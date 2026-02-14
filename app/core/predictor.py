@@ -1,364 +1,391 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
-MODULE: app/core/predictor.py 
+MODULE: app/core/predictor.py
+Version: 1.0.0 - ALIGNED WITH NOTEBOOK
 Auteur: Stage R&D - IMT Nord Europe
-Version: 1.1.0 - CORRECTION : Suppression lru_cache incompatible
 ═══════════════════════════════════════════════════════════════════════════════
-Ce module contient la logique de prédiction du béton, avec validation des entrées,
-feature engineering aligné avec le notebook, et vérification stricte de l'ordre des features.
-Il est conçu pour être robuste, maintenable et facilement testable.
 """
 
-import pandas as pd
 import numpy as np
-from typing import Dict, List, Any, Optional, Tuple
+import pandas as pd
 import logging
-from dataclasses import dataclass
-# functools importé mais plus utilisé pour lru_cache ici (supprimé)
+from typing import Dict, List, Optional, Any
+from pathlib import Path
 
-# Import config centralisée
-from app.models.model_config import MODEL_FEATURES_ORDER
-
-try:
-    import streamlit as st
-    HAS_STREAMLIT = True
-except ImportError:
-    HAS_STREAMLIT = False
-    st = None  # Fallback
-
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ORDRE FEATURES CRITIQUE (ISSU DU NOTEBOOK SECTION 3.3)
+# ═════════════════════════════════════════════════════════════════════════════
 
-@dataclass
-class PredictionResult:
-    """Résultat structuré d'une prédiction béton."""
-    Resistance: float
-    Diffusion_Cl: float
-    Carbonatation: float
-    Ratio_E_L: float
-    Liant_Total: float
-    Pct_Substitution: float
-    
-    def to_dict(self) -> Dict[str, float]:
-        return self.__dict__
+MODEL_FEATURES_ORDER = [
+    'Ciment',
+    'Eau',
+    'Age',
+    'GravilonsGros',
+    'SableFin',
+    'Laitier',
+    'CendresVolantes',
+    'Superplastifiant', 
+    'Ratio_E_L',
+    'Pct_Laitier',
+    'Log_Age',
+    'Sqrt_Age',
+    'Ciment_x_LogAge',
+    'Eau_x_SP',
+    'Liant_x_RatioEL',
+    'Ratio_Granulats'
+]  # 16 features (8 originales + 8 engineered, sans Pct_CendresVolantes)
+
+# Bornes physiques pour validation
+BOUNDS = {
+    'Ciment': (100, 550),
+    'Laitier': (0, 350),
+    'CendresVolantes': (0, 200),
+    'Eau': (120, 250),
+    'Superplastifiant': (0, 20),
+    'GravilonsGros': (800, 1200),
+    'SableFin': (600, 900),
+    'Age': (1, 365)
+}
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# VALIDATION ENTRÉES
-# ═══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
+# FONCTION CRITIQUE : FEATURE ENGINEERING (EXACT NOTEBOOK)
+# ═════════════════════════════════════════════════════════════════════════════
 
-def validate_composition(composition: Dict[str, float]) -> Tuple[bool, str]:
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Valide une composition béton.
-    """
-    required_keys = [
-        "Ciment", "Laitier", "CendresVolantes", "Eau",
-        "Superplastifiant", "GravilonsGros", "SableFin", "Age"
-    ]
+    Feature engineering EXACT du notebook Section 2.3.
     
-    missing = [k for k in required_keys if k not in composition]
-    if missing:
-        return False, f"Clés manquantes: {missing}"
-    
-    for key, value in composition.items():
-        if key in required_keys:
-            try:
-                val = float(value)
-                if val < 0:
-                    return False, f"Valeur négative pour {key}: {value}"
-            except (TypeError, ValueError):
-                return False, f"Valeur non numérique pour {key}: {value}"
-    
-    if composition["Age"] < 1:
-        return False, "Age doit être ≥ 1 jour"
-    
-    liant_total = sum(composition.get(k, 0) for k in ["Ciment", "Laitier", "CendresVolantes"])
-    if liant_total < 150:
-        return False, f"Liant total trop faible: {liant_total:.1f} kg/m³"
-    
-    return True, "Composition valide"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# FEATURE ENGINEERING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def engineer_features(df_input: pd.DataFrame) -> pd.DataFrame:
-    """
-    Feature engineering aligné avec le notebook.
-    """
-    df = df_input.copy()
-    epsilon = 1e-5
-    
-    df['Liant_Total'] = df['Ciment'] + df['Laitier'] + df['CendresVolantes']
-    df['Ratio_E_L'] = df['Eau'] / (df['Liant_Total'] + epsilon)
-    df['Pct_Laitier'] = df['Laitier'] / (df['Liant_Total'] + epsilon)
-    df['Log_Age'] = np.log(df['Age'] + 1)
-    df['Sqrt_Age'] = np.sqrt(df['Age'])
-    df['Ciment_x_LogAge'] = df['Ciment'] * df['Log_Age']
-    df['Eau_x_SP'] = df['Eau'] * df['Superplastifiant']
-    df['Liant_x_RatioEL'] = df['Liant_Total'] * df['Ratio_E_L']
-    volume_total = df[['Ciment', 'Laitier', 'CendresVolantes', 'Eau', 'GravilonsGros', 'SableFin']].sum(axis=1)
-    df['Ratio_Granulats'] = (df['GravilonsGros'] + df['SableFin']) / (volume_total + epsilon)
-    df.replace([np.inf, -np.inf], 0, inplace=True)
-    df.fillna(0, inplace=True)
-    
-    return df
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# VÉRIFICATION ALIGNEMENT FEATURES
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def verify_features_alignment(
-    feature_list: List[str],
-    verbose: bool = True
-) -> Tuple[bool, str]:
-    """
-    Vérifie alignement avec MODEL_FEATURES_ORDER.
-    """
-    if len(feature_list) != 15:
-        msg = f"❌ Nombre incorrect: {len(feature_list)} != 15"
-        if verbose: logger.error(msg)
-        return False, msg
-    
-    if feature_list != MODEL_FEATURES_ORDER:
-        msg = "❌ Ordre incorrect"
-        if verbose:
-            logger.error(msg)
-            for i, (p, e) in enumerate(zip(feature_list, MODEL_FEATURES_ORDER)):
-                status = "✅" if p == e else "❌"
-                logger.error(f"  {i:2d}. {status} {p:20s} vs {e}")
-        return False, msg
-    
-    if set(feature_list) != set(MODEL_FEATURES_ORDER):
-        msg = "❌ Features manquantes/doublons"
-        if verbose:
-            missing = set(MODEL_FEATURES_ORDER) - set(feature_list)
-            extra = set(feature_list) - set(MODEL_FEATURES_ORDER)
-            logger.error(f"  Missing: {missing}")
-            logger.error(f"  Extra: {extra}")
-        return False, msg
-    
-    if verbose: logger.info("✅ Alignement parfait")
-    return True, "✅ Alignement parfait"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PRÉDICTION PRINCIPALE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# DECORATEUR @lru_cache SUPPRIMÉ CAR COMPATIBLE AVEC DICT ET OBJECTS SKLEARN (UNHASHABLE)
-def predict_concrete_properties(
-    composition: Dict[str, float],
-    model: Optional[Any] = None,
-    feature_list: Optional[List[str]] = None
-) -> Dict[str, float]:
-    """
-    Prédit les propriétés du béton.
-    
-    Note: Le cache n'est pas utilisé ici car les arguments (dict, model obj) ne sont pas hachables.
-    Le modèle est déjà mis en cache via @st.cache_resource dans le script principal.
-    """
-    try:
-        is_valid, msg = validate_composition(composition)
-        if not is_valid:
-            raise ValueError(msg)
-        
-        if model is None:
-            if HAS_STREAMLIT and 'model' in st.session_state:
-                model = st.session_state.model
-            else:
-                raise RuntimeError("Modèle non chargé")
-        
-        if feature_list is None:
-            if HAS_STREAMLIT and 'features' in st.session_state:
-                feature_list = st.session_state.features
-            else:
-                feature_list = MODEL_FEATURES_ORDER
-        
-        is_aligned, msg = verify_features_alignment(feature_list)
-        if not is_aligned:
-            raise ValueError(msg)
-        
-        df_input = pd.DataFrame([composition])
-        df_engineered = engineer_features(df_input)
-        
-        missing = [f for f in feature_list if f not in df_engineered.columns]
-        if missing:
-            raise ValueError(f"Features manquantes: {missing}")
-        
-        X_pred = df_engineered[feature_list]
-        
-        if list(X_pred.columns) != feature_list:
-            raise ValueError("Ordre features modifié après sélection")
-        
-        raw_preds = model.predict(X_pred)[0]
-        
-        liant_total = float(df_engineered["Liant_Total"].values[0])
-        ratio_el = float(df_engineered["Ratio_E_L"].values[0])
-        pct_sub = (composition.get("Laitier", 0) + composition.get("CendresVolantes", 0)) / (liant_total + 1e-5)
-        
-        results = {
-            "Resistance": round(float(raw_preds[0]), 1),
-            "Diffusion_Cl": round(float(raw_preds[1]), 2),
-            "Carbonatation": round(float(raw_preds[2]), 1),
-            "Ratio_E_L": round(ratio_el, 3),
-            "Liant_Total": round(liant_total, 1),
-            "Pct_Substitution": round(pct_sub, 3)
-        }
-        
-        return results
-    
-    except Exception as e:
-        logger.error(f"Prédiction échouée: {e}", exc_info=True)
-        raise RuntimeError(f"Erreur prédiction: {e}")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PRÉDICTION BATCH
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def predict_batch(
-    compositions: List[Dict[str, float]],
-    model: Any = None,
-    feature_list: Optional[List[str]] = None
-) -> List[Dict[str, float]]:
-    """
-    Prédiction batch optimisée (vectorisée).
+    CRITIQUE : Doit reproduire EXACTEMENT les transformations du notebook
+    pour garantir compatibilité avec le modèle entraîné.
     
     Args:
-        compositions: Liste de compositions
-        model: Modèle ML
-        feature_list: Liste features
+        df: DataFrame avec colonnes originales
         
     Returns:
-        Liste de résultats
+        DataFrame avec features engineered
     """
-    import streamlit as st
+    df_new = df.copy()
     
-    try:
-        # Récupération modèle
-        if model is None:
-            if 'model' not in st.session_state:
-                raise RuntimeError("❌ Modèle non chargé")
-            model = st.session_state.model
+    # ─────────────────────────────────────────────────────────────────────────
+    # 1. RATIOS FONDAMENTAUX
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    df_new['Liant_Total'] = (
+        df_new['Ciment'] + 
+        df_new['Laitier'] + 
+        df_new['CendresVolantes']
+    )
+    
+    # Protection division par zéro
+    df_new['Ratio_E_L'] = df_new['Eau'] / (df_new['Liant_Total'] + 1e-5)
+    df_new['Pct_Laitier'] = df_new['Laitier'] / (df_new['Liant_Total'] + 1e-5)
+    df_new['Pct_CendresVolantes'] = df_new['CendresVolantes'] / (df_new['Liant_Total'] + 1e-5)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 2. TRANSFORMATIONS CINÉTIQUES
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    df_new['Log_Age'] = np.log(df_new['Age'] + 1)
+    df_new['Sqrt_Age'] = np.sqrt(df_new['Age'])
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 3. INTERACTIONS CRITIQUES
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    df_new['Ciment_x_LogAge'] = df_new['Ciment'] * df_new['Log_Age']
+    df_new['Eau_x_SP'] = df_new['Eau'] * df_new['Superplastifiant']
+    df_new['Liant_x_RatioEL'] = df_new['Liant_Total'] * df_new['Ratio_E_L']
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 4. COMPACITÉ GRANULAIRE
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    volume_total = df_new[[
+        'Ciment', 'Laitier', 'CendresVolantes', 'Eau',
+        'GravilonsGros', 'SableFin'
+    ]].sum(axis=1)
+    
+    df_new['Ratio_Granulats'] = (
+        (df_new['GravilonsGros'] + df_new['SableFin']) / 
+        (volume_total + 1e-5)
+    )
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 5. NETTOYAGE (CRITIQUE)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    df_new.replace([np.inf, -np.inf], 0, inplace=True)
+    df_new.fillna(0, inplace=True)
+    
+    return df_new
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# FONCTION : VALIDATION COMPOSITION
+# ═════════════════════════════════════════════════════════════════════════════
+
+def validate_composition(composition: Dict[str, float]) -> Dict[str, Any]:
+    """
+    Valide une composition béton selon bornes physiques.
+    
+    Args:
+        composition: Dict avec composants (kg/m³)
         
-        # Récupération features
-        if feature_list is None:
-            if 'features' in st.session_state:
-                feature_list = st.session_state.features
-            else:
-                feature_list = MODEL_FEATURES_ORDER.copy()
+    Returns:
+        Dict avec 'valid': bool, 'errors': List[str], 'warnings': List[str]
+    """
+    errors = []
+    warnings = []
+    
+    # Vérifier clés minimales
+    required_keys = ['Ciment', 'Eau', 'Age']
+    missing = [k for k in required_keys if k not in composition]
+    
+    if missing:
+        errors.append(f"Clés manquantes: {missing}")
+        return {'valid': False, 'errors': errors, 'warnings': warnings}
+    
+    # Vérifier bornes
+    for param, (min_val, max_val) in BOUNDS.items():
+        value = composition.get(param, 0)
         
-        # Vérification alignement
-        is_aligned, msg = verify_features_alignment(feature_list, verbose=False)
-        if not is_aligned:
-            raise ValueError(f"Alignement features incorrect: {msg}")
-        
-        # Validation batch
-        for i, comp in enumerate(compositions):
-            is_valid, message = validate_composition(comp)
-            if not is_valid:
-                raise ValueError(f"Composition {i+1} invalide: {message}")
-        
-        # Conversion DataFrame batch
-        df_batch = pd.DataFrame(compositions)
-        
-        # Feature engineering batch (vectorisé)
-        df_engineered = engineer_features(df_batch)
-        
-        # Sélection features
-        X_batch = df_engineered[feature_list]
-        
-        # Prédiction batch (1 seul appel modèle)
-        raw_preds = model.predict(X_batch)
-        
-        # Post-traitement
-        results = []
-        for i in range(len(compositions)):
-            liant_total = float(df_engineered.iloc[i]["Liant_Total"])
-            ratio_el = float(df_engineered.iloc[i]["Ratio_E_L"])
-            
-            pct_sub = float(
-                (compositions[i].get("Laitier", 0) + 
-                 compositions[i].get("CendresVolantes", 0)) / 
-                (liant_total + 1e-5)
+        if value < min_val:
+            errors.append(
+                f"{param} trop faible: {value:.1f} < {min_val} kg/m³"
             )
-            
-            result = {
-                "Resistance": round(float(raw_preds[i][0]), 1),
-                "Diffusion_Cl": round(float(raw_preds[i][1]), 2),
-                "Carbonatation": round(float(raw_preds[i][2]), 1),
-                "Ratio_E_L": round(ratio_el, 3),
-                "Liant_Total": round(liant_total, 1),
-                "Pct_Substitution": round(pct_sub, 3)
-            }
-            results.append(result)
-        
-        logger.info(f"✅ Prédiction batch: {len(results)} formulations")
-        return results
-        
-    except Exception as e:
-        logger.error(f"❌ Erreur prédiction batch: {e}")
-        raise
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# FONCTIONS UTILITAIRES
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def get_default_features() -> List[str]:
-    """Retourne l'ordre des features du modèle."""
-    return MODEL_FEATURES_ORDER.copy()
-
-
-def simulate_prediction(composition: Dict[str, float]) -> Dict[str, float]:
-    """
-    Simulation de prédiction basée sur lois physiques.
-    Utilisée pour tests sans modèle ML.
-    """
-    ciment = composition.get("Ciment", 350)
-    eau = composition.get("Eau", 175)
-    laitier = composition.get("Laitier", 0)
-    cendres = composition.get("CendresVolantes", 0)
-    age = composition.get("Age", 28)
+        elif value > max_val:
+            errors.append(
+                f"{param} trop élevé: {value:.1f} > {max_val} kg/m³"
+            )
+    
+    # Vérifications physiques
+    ciment = composition.get('Ciment', 0)
+    laitier = composition.get('Laitier', 0)
+    cendres = composition.get('CendresVolantes', 0)
+    eau = composition.get('Eau', 0)
     
     liant_total = ciment + laitier + cendres
-    ratio_el = eau / (liant_total + 1e-5)
+    ratio_el = eau / (liant_total + 1e-5) if liant_total > 0 else 99
     
-    # Loi d'Abrams : fc = A / (E/L)^B
-    A, B = 100, 1.5
-    resistance = A / (ratio_el**B + 0.5) * np.log(age + 1) / np.log(28 + 1)
+    # Ratio E/L critique
+    if ratio_el > 0.70:
+        errors.append(
+            f"Ratio E/L excessif: {ratio_el:.3f} > 0.70 (béton non conforme)"
+        )
+    elif ratio_el > 0.60:
+        warnings.append(
+            f"Ratio E/L élevé: {ratio_el:.3f} > 0.60 (durabilité limitée)"
+        )
     
-    # Diffusion chlorures (anti-corrélée à résistance)
-    diffusion_cl = max(0.5, 20 - resistance * 0.3)
+    # Dosage ciment minimum
+    if ciment < 200:
+        errors.append(
+            f"Dosage ciment insuffisant: {ciment:.0f} < 200 kg/m³"
+        )
     
-    # Carbonatation (loi de Fick simplifiée)
-    carbonatation = max(0.1, 10 * ratio_el * np.sqrt(age / 28))
+    # Taux substitution
+    taux_sub = (laitier + cendres) / (liant_total + 1e-5)
+    if taux_sub > 0.70:
+        warnings.append(
+            f"Taux substitution élevé: {taux_sub*100:.0f}% > 70% (prise lente)"
+        )
+    
+    is_valid = len(errors) == 0
     
     return {
-        "Resistance": round(resistance, 1),
-        "Diffusion_Cl": round(diffusion_cl, 2),
-        "Carbonatation": round(carbonatation, 1),
-        "Ratio_E_L": round(ratio_el, 3),
-        "Liant_Total": round(liant_total, 1),
-        "Pct_Substitution": round((laitier + cendres) / (liant_total + 1e-5), 3)
+        'valid': is_valid,
+        'errors': errors,
+        'warnings': warnings,
+        'ratio_el': ratio_el,
+        'liant_total': liant_total,
+        'taux_substitution': taux_sub
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# EXPORTS
-# ═══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
+# FONCTION PRINCIPALE : PRÉDICTION
+# ═════════════════════════════════════════════════════════════════════════════
+
+def predict_concrete_properties(
+    composition: Dict[str, float],
+    model: Any,
+    feature_list: Optional[List[str]] = None,
+    validate: bool = True
+) -> Dict[str, float]:
+    """
+    Prédit propriétés béton (3 cibles).
+    
+    Args:
+        composition: Composition béton (kg/m³)
+        model: Modèle ML (MultiOutputRegressor)
+        feature_list: Liste features (utilise MODEL_FEATURES_ORDER si None)
+        validate: Valider inputs
+        
+    Returns:
+        Dict avec Resistance, Diffusion_Cl, Carbonatation, Ratio_E_L, Liant_Total
+        
+    Raises:
+        ValueError: Si composition invalide
+        
+    Example:
+```python
+        composition = {
+            'Ciment': 280, 'Laitier': 0, 'CendresVolantes': 0,
+            'Eau': 180, 'Superplastifiant': 0,
+            'GravillosGros': 1100, 'SableFin': 750, 'Age': 28
+        }
+        
+        predictions = predict_concrete_properties(composition, model)
+        # {'Resistance': 25.8, 'Diffusion_Cl': 7.76, 'Carbonatation': 16.7, ...}
+```
+    """
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 1. VALIDATION
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    if validate:
+        validation = validate_composition(composition)
+        
+        if not validation['valid']:
+            error_msg = "; ".join(validation['errors'])
+            raise ValueError(f"Composition invalide: {error_msg}")
+        
+        if validation['warnings']:
+            for warning in validation['warnings']:
+                logger.warning(f"{warning}")
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 2. COMPLÉTER COMPOSITION (valeurs par défaut)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    defaults = {
+        'Ciment': 280.0,
+        'Laitier': 0.0,
+        'CendresVolantes': 0.0,
+        'Eau': 180.0,
+        'Superplastifiant': 0.0,
+        'GravilonsGros': 1100.0,
+        'SableFin': 750.0,
+        'Age': 28.0
+    }
+    
+    full_composition = {**defaults, **composition}
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 3. FEATURE ENGINEERING
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    df_input = pd.DataFrame([full_composition])
+    df_engineered = engineer_features(df_input)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 4. SÉLECTION FEATURES (ORDRE CRITIQUE)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    if feature_list is None:
+        feature_list = MODEL_FEATURES_ORDER
+    
+    # Vérifier disponibilité features
+    missing_features = [f for f in feature_list if f not in df_engineered.columns]
+    if missing_features:
+        raise ValueError(
+            f"Features manquantes après engineering: {missing_features}"
+        )
+    
+    X_input = df_engineered[feature_list]
+    
+    # Vérifier NaN/Inf
+    if X_input.isnull().any().any():
+        logger.warning("⚠️ NaN détectés, remplacement par 0")
+        X_input.fillna(0, inplace=True)
+    
+    if np.isinf(X_input.values).any():
+        logger.warning("⚠️ Inf détectés, remplacement par 0")
+        X_input.replace([np.inf, -np.inf], 0, inplace=True)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # 5. PRÉDICTION (3 CIBLES)
+    # ─────────────────────────────────────────────────────────────────────────
+    
+    try:
+        predictions = model.predict(X_input)[0]
+        
+        # Validation bornes physiques
+        resistance = float(np.clip(predictions[0], 0, 150))
+        diffusion_cl = float(np.clip(predictions[1], 0, 30))
+        carbonatation = float(np.clip(predictions[2], 0, 100))
+        
+        # Calculs supplémentaires
+        liant_total = float(df_engineered['Liant_Total'].values[0])
+        ratio_el = float(df_engineered['Ratio_E_L'].values[0])
+        pct_substitution = (
+            (full_composition['Laitier'] + full_composition['CendresVolantes']) / 
+            (liant_total + 1e-5)
+        )
+        
+        result = {
+            'Resistance': round(resistance, 2),
+            'Diffusion_Cl': round(diffusion_cl, 3),
+            'Carbonatation': round(carbonatation, 2),
+            'Ratio_E_L': round(ratio_el, 3),
+            'Liant_Total': round(liant_total, 1),
+            'Pct_Substitution': round(pct_substitution, 3)
+        }
+        
+        logger.debug(
+            f"Prédiction: R={result['Resistance']:.1f} MPa, "
+            f"Diff={result['Diffusion_Cl']:.2f}, "
+            f"Carb={result['Carbonatation']:.1f} mm"
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Erreur prédiction: {e}", exc_info=True)
+        raise RuntimeError(f"Erreur lors de la prédiction: {e}")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# FONCTIONS UTILITAIRES
+# ═════════════════════════════════════════════════════════════════════════════
+
+def get_default_features() -> List[str]:
+    """Retourne liste features par défaut."""
+    return MODEL_FEATURES_ORDER.copy()
+
+
+def verify_features_alignment(model, expected_features: List[str]) -> bool:
+    """
+    Vérifie cohérence features modèle vs attendues.
+    
+    Args:
+        model: Modèle ML
+        expected_features: Liste features attendues
+        
+    Returns:
+        True si cohérent
+    """
+    try:
+        # Test avec données fictives
+        test_data = pd.DataFrame([{f: 0.5 for f in expected_features}])
+        _ = model.predict(test_data)
+        logger.info("Alignement features vérifié")
+        return True
+    except Exception as e:
+        logger.error(f"Erreur alignement features: {e}")
+        return False
+
 
 __all__ = [
-    "predict_concrete_properties",
-    "predict_batch",
-    "validate_composition",
-    "engineer_features",
-    "get_default_features",
-    "verify_features_alignment",
-    "simulate_prediction",
-    "PredictionResult",
-    "MODEL_FEATURES_ORDER"
+    'predict_concrete_properties',
+    'engineer_features',
+    'validate_composition',
+    'get_default_features',
+    'verify_features_alignment',
+    'MODEL_FEATURES_ORDER',
+    'BOUNDS'
 ]

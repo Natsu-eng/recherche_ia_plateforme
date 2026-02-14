@@ -188,7 +188,7 @@ class ConcreteAnalyzer:
         )
         
         logger.info(
-            f"✅ Analyse sensibilité {parameter} : "
+            f"Analyse sensibilité {parameter} : "
             f"Élasticité Résistance = {elasticities.get('Resistance', 0):.3f}"
         )
         
@@ -310,7 +310,7 @@ class ConcreteAnalyzer:
             )
         
         logger.info(
-            f"✅ Intervalles confiance calculés : {len(intervals)} cibles"
+            f"Intervalles confiance calculés : {len(intervals)} cibles"
         )
         
         return intervals
@@ -373,7 +373,7 @@ class ConcreteAnalyzer:
                 }
                 results.append(result)
         
-        logger.info(f"✅ Comparaison de {len(results)} formulations")
+        logger.info(f"Comparaison de {len(results)} formulations")
         
         return pd.DataFrame(results)
     
@@ -456,7 +456,7 @@ class ConcreteAnalyzer:
             result["is_outlier"] = outlier_mask
         
         n_outliers = result["is_outlier"].sum()
-        logger.info(f"✅ Détection outliers : {n_outliers} détectés")
+        logger.info(f"Détection outliers : {n_outliers} détectés")
         
         return result
     
@@ -550,7 +550,7 @@ class ConcreteAnalyzer:
         reliability_score = max(0, 100 - mean_cv * 10)
         
         logger.info(
-            f"✅ Analyse robustesse : Score fiabilité = {reliability_score:.1f}/100"
+            f"Analyse robustesse : Score fiabilité = {reliability_score:.1f}/100"
         )
         
         return {

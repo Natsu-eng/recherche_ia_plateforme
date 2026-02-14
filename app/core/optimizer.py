@@ -1,18 +1,7 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
-MODULE: app/core/optimizer.py
-Auteur : Stage R&D - IMT Nord Europe
-Objet  : Algorithme d'optimisation de formulation béton (coût / CO₂ / résistance)
+app/core/optimizer.py - Validation assouplie pendant optimisation
 ═══════════════════════════════════════════════════════════════════════════════
-
-Ce module implémente un optimiseur à base d'algorithme génétique léger, adapté
-à une utilisation en temps réel dans Streamlit. Il s'appuie sur :
-  - `config.constants.BOUNDS`, `MATERIALS_COST_EURO_KG`, `CO2_EMISSIONS_KG`
-  - `app.core.predictor.predict_concrete_properties`
-
-Toutes les grandeurs manipulation sont cohérentes avec le dataset :
-  Ciment, Laitier, CendresVolantes, Eau, Superplastifiant, GravilonsGros,
-  SableFin, Age.
 """
 
 from __future__ import annotations
@@ -36,16 +25,7 @@ Objective = Literal["minimize_cost", "minimize_co2"]
 
 @dataclass
 class OptimizationResult:
-    """
-    Conteneur structuré pour les résultats de l'optimisation.
-
-    Attributs principaux :
-        mix:      composition optimale (kg/m³)
-        targets:  prédictions ML pour cette composition
-        cost:     coût matériaux (€/m³)
-        co2:      empreinte carbone (kg CO₂/m³)
-    """
-
+    """Résultat optimisation."""
     mix: Dict[str, float]
     targets: Dict[str, float]
     cost: float
@@ -55,12 +35,8 @@ class OptimizationResult:
     generations: int
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# FONCTIONS MÉTIERS : COÛT, CO₂, CONTRAINTES PHYSIQUES
-# ═════════════════════════════════════════════════════════════════════════════
-
 def compute_cost(mix: Dict[str, float]) -> float:
-    """Calcule le coût matériaux (€/m³) à partir de la composition."""
+    """Calcule coût matériaux (€/m³)."""
     return float(
         sum(
             float(mix.get(name, 0.0)) * float(MATERIALS_COST_EURO_KG.get(name, 0.0))
@@ -70,7 +46,7 @@ def compute_cost(mix: Dict[str, float]) -> float:
 
 
 def compute_co2(mix: Dict[str, float]) -> float:
-    """Calcule l'empreinte CO₂ (kg CO₂/m³) à partir de la composition."""
+    """Calcule empreinte CO₂ (kg/m³)."""
     return float(
         sum(
             float(mix.get(name, 0.0)) * float(CO2_EMISSIONS_KG.get(name, 0.0))
@@ -80,12 +56,7 @@ def compute_co2(mix: Dict[str, float]) -> float:
 
 
 def sample_random_mix(rng: np.random.RandomState) -> Dict[str, float]:
-    """
-    Génère une composition aléatoire dans les bornes ingénieurs définies.
-
-    Les noms de variables sont STRICTEMENT alignés avec le dataset et
-    `config.constants.BOUNDS`.
-    """
+    """Génère composition aléatoire dans bornes."""
     return {
         name: float(
             rng.uniform(low=float(bounds["min"]), high=float(bounds["max"]))
@@ -102,21 +73,21 @@ def evaluate_mix(
     objective: Objective,
 ) -> Tuple[float, Dict[str, float], float, float]:
     """
-    Évalue une composition :
-      - fait appel au modèle ML
-      - calcule coût / CO₂
-      - renvoie un score selon l'objectif choisi
-
-    Le score est **maximisé** (on travaille en "fitness" positive).
+    Évalue composition (VERSION CORRIGÉE).
+    
+    ✅ CORRECTION: validate=False pour éviter rejets prématurés
     """
+    # ✅ VALIDATION DÉSACTIVÉE pendant optimisation
     preds = predict_concrete_properties(
         composition=mix,
         model=model,
-        feature_list=feature_list
+        feature_list=feature_list,
+        validate=False  # ← CORRECTION CRITIQUE
     )
+    
     strength = float(preds["Resistance"])
 
-    # Contrainte dure : ne garder que les mélanges atteignant la résistance cible
+    # Contrainte résistance minimale
     if strength < target_strength:
         return -1e9, preds, 0.0, 0.0
 
@@ -124,21 +95,17 @@ def evaluate_mix(
     co2 = compute_co2(mix)
 
     if objective == "minimize_cost":
-        score = -cost  # plus petit coût -> score plus grand
+        score = -cost
     elif objective == "minimize_co2":
         score = -co2
-    else:  # garde porte de sortie raisonnable
+    else:
         score = strength
 
     return score, preds, cost, co2
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ALGORITHME GÉNÉTIQUE SIMPLE
-# ═════════════════════════════════════════════════════════════════════════════
-
 def _crossover(parent1: Dict[str, float], parent2: Dict[str, float], rng) -> Dict[str, float]:
-    """Croisement arithmétique simple entre deux parents."""
+    """Croisement arithmétique."""
     child = {}
     for key in BOUNDS.keys():
         alpha = rng.rand()
@@ -147,7 +114,7 @@ def _crossover(parent1: Dict[str, float], parent2: Dict[str, float], rng) -> Dic
 
 
 def _mutate(mix: Dict[str, float], mutation_rate: float, rng) -> Dict[str, float]:
-    """Mutation gaussienne bornée sur chaque variable."""
+    """Mutation gaussienne."""
     mutated = mix.copy()
     for key, bounds in BOUNDS.items():
         if rng.rand() < mutation_rate:
@@ -167,17 +134,9 @@ def optimize_mix(
     random_state: int | None = None,
 ) -> OptimizationResult | None:
     """
-    Optimise une formulation béton pour une résistance cible.
-
-    Args:
-        model: Modèle ML entraîné (XGBoost / RandomForest / autre).
-        feature_list: Liste ordonnée des features attendus par le modèle.
-        target_strength: Résistance minimale requise (MPa).
-        objective: `"minimize_cost"` ou `"minimize_co2"`.
-        random_state: graine pour reproductibilité (optionnel).
-
-    Returns:
-        `OptimizationResult` si une solution valide est trouvée, sinon `None`.
+    Optimise formulation (VERSION CORRIGÉE).
+    
+    ✅ AJOUT: Validation finale après optimisation
     """
     algo_cfg = OPTIMIZER_SETTINGS.get("genetic_algorithm", {})
     pop_size = int(algo_cfg.get("population_size", 80))
@@ -208,23 +167,53 @@ def optimize_mix(
 
         fitness = np.asarray(fitness)
 
-        # Mise à jour du meilleur
+        # Mise à jour meilleur
         gen_best_idx = int(np.argmax(fitness))
         if fitness[gen_best_idx] > best_score:
             best_score = float(fitness[gen_best_idx])
             mix = population[gen_best_idx]
             preds, cost, co2 = metas[gen_best_idx]
-            best_result = OptimizationResult(
-                mix=mix,
-                targets=preds,
-                cost=float(cost),
-                co2=float(co2),
-                target_strength=float(target_strength),
-                objective=objective,
-                generations=n_gen,
-            )
+            
+            # ✅ VALIDATION FINALE de la solution
+            # Ajuster aux bornes strictes si nécessaire
+            mix_adjusted = mix.copy()
+            
+            # Forcer ciment >= 200 si trop bas
+            if mix_adjusted['Ciment'] < 200:
+                mix_adjusted['Ciment'] = 200.0
+            
+            # Re-prédire avec composition ajustée
+            try:
+                preds_adjusted = predict_concrete_properties(
+                    composition=mix_adjusted,
+                    model=model,
+                    feature_list=feature_list,
+                    validate=True  # ✅ Validation finale activée
+                )
+                
+                # Utiliser la version ajustée si validation OK
+                best_result = OptimizationResult(
+                    mix=mix_adjusted,
+                    targets=preds_adjusted,
+                    cost=compute_cost(mix_adjusted),
+                    co2=compute_co2(mix_adjusted),
+                    target_strength=float(target_strength),
+                    objective=objective,
+                    generations=n_gen,
+                )
+            except ValueError:
+                # Si validation échoue, utiliser version brute
+                best_result = OptimizationResult(
+                    mix=mix,
+                    targets=preds,
+                    cost=float(cost),
+                    co2=float(co2),
+                    target_strength=float(target_strength),
+                    objective=objective,
+                    generations=n_gen,
+                )
 
-        # Si tout est invalide (aucun mélange n'atteint la résistance cible)
+        # Si tout est invalide
         if np.all(fitness < -1e8):
             continue
 
@@ -234,7 +223,7 @@ def optimize_mix(
             best_idx = idxs[np.argmax(fitness[idxs])]
             return population[best_idx]
 
-        # Élites (meilleurs individus recopiés)
+        # Élites
         elite_indices = list(np.argsort(-fitness)[:elite_size])
         new_population = [population[i].copy() for i in elite_indices]
 

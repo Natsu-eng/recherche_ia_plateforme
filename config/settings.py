@@ -44,7 +44,7 @@ APP_SETTINGS = {
     "department": "Génie Civil & Intelligence Artificielle",
     
     # Contact
-    "email": "support@imt-nord-europe.fr",
+    "email": "mailto:support@imt-nord-europe.fr",
     "phone": "+33 (0)3 27 71 22 22",
     "website": "https://imt-nord-europe.fr",
     
@@ -146,9 +146,13 @@ DATABASE_SETTINGS = {
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION POSTGRESQL
 # ═══════════════════════════════════════════════════════════════════════════════
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Charge le .env
 
 POSTGRES_SETTINGS = {
-    "database_url": "postgresql://app_beton:Passer123@localhost:5432/concrete_ai_platform",
+    "database_url": os.getenv('DATABASE_URL', 'postgresql://app_beton:Passer123@localhost:5432/concrete_ai_platform'),
     "pool_size": 10,
     "max_overflow": 20,
     "pool_timeout": 30,

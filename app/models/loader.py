@@ -55,7 +55,7 @@ def load_production_assets(
 
         if isinstance(features_raw, np.ndarray):
             features = features_raw.tolist()
-            logger.info("Conversion numpy.ndarray → list Python effectuée")
+            logger.info("Conversion numpy.ndarray en list Python effectuée")
         elif isinstance(features_raw, list):
             features = features_raw
         else:
@@ -122,9 +122,7 @@ def load_production_assets(
         else:
             logger.warning(f"Attention : Résistance C25/30 = {pred_test:.2f} MPa (attendu ~{expected})")
 
-        logger.info("═"*60)
         logger.info("ASSETS CHARGÉS AVEC SUCCÈS")
-        logger.info("═"*60)
 
         return model, features, metadata
 

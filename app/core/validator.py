@@ -488,7 +488,7 @@ def validate_formulation(
     is_valid = not any(a.severity == Severity.CRITICAL for a in alerts)
     
     logger.info(
-        f"✅ Validation terminée : {len(alerts)} alertes, "
+        f"Validation terminée : {len(alerts)} alertes, "
         f"Score={compliance_score:.0f}/100, Valide={is_valid}"
     )
     

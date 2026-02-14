@@ -1,319 +1,330 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
 MODULE: app/components/forms.py
+Description: Formulaires de saisie (composition béton, objectifs optimisation)
 Auteur: Stage R&D - IMT Nord Europe
-Fonction: Composants de formulaire stylisés
-Version: 2.0.0 - Production Ready
+Version: 1.0.0
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
-import streamlit as st  # type: ignore
-from typing import Dict, List, Optional, Callable, Any
+import streamlit as st
+from typing import Dict, Optional, Literal
+import logging
+
+from config.constants import BOUNDS, LABELS_MAP, PRESET_FORMULATIONS
+from config.settings import OPTIMIZER_SETTINGS
+
+logger = logging.getLogger(__name__)
 
 
-def create_slider_with_help(
-    label: str,
-    min_value: float,
-    max_value: float,
-    value: float,
-    step: float = 1.0,
-    unit: str = "",
-    help_text: str = "",
-    key: Optional[str] = None
-) -> float:
-    """
-    Slider avec aide contextuelle et indicateurs.
-    
-    Args:
-        label: Label du slider
-        min_value: Valeur minimale
-        max_value: Valeur maximale
-        value: Valeur initiale
-        step: Incrément
-        unit: Unité de mesure
-        help_text: Texte d'aide
-        key: Clé unique Streamlit
-    
-    Returns:
-        Valeur sélectionnée
-    """
-    # Container avec style
-    with st.container():
-        # Header slider
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            st.markdown(f"**{label}**")
-            if help_text:
-                st.caption(f"ℹ️ {help_text}")
-        
-        with col2:
-            st.markdown(f"`{value:,.1f} {unit}`")
-        
-        # Slider Streamlit
-        val = st.slider(
-            label="",  # Label déjà affiché
-            min_value=min_value,
-            max_value=max_value,
-            value=value,
-            step=step,
-            key=key or label
-        )
-        
-        # Indicateur de plage
-        col3, col4, col5 = st.columns([1, 4, 1])
-        with col3:
-            st.caption(f"{min_value:,.0f}")
-        with col4:
-            # Barre de progression
-            progress = (val - min_value) / (max_value - min_value)
-            st.progress(progress)
-        with col5:
-            st.caption(f"{max_value:,.0f}")
-        
-        return val
-
-
-def create_formulation_form(
-    default_values: Dict[str, float],
-    bounds: Dict[str, Dict[str, Any]],
-    key_prefix: str = ""
+def render_formulation_input(
+    key_suffix: str = "",
+    default_values: Optional[Dict[str, float]] = None,
+    layout: Literal["compact", "expanded"] = "compact",
+    show_presets: bool = True
 ) -> Dict[str, float]:
     """
-    Formulaire complet pour saisir une formulation béton.
+    Génère les sliders pour saisir une composition béton.
     
     Args:
-        default_values: Valeurs par défaut
-        bounds: Bornes des paramètres
-        key_prefix: Préfixe pour clés Streamlit
+        key_suffix: Suffixe pour clés Streamlit (éviter conflits)
+        default_values: Valeurs par défaut (sinon utilise BOUNDS['default'])
+        layout: Layout (compact = 2 colonnes, expanded = 1 colonne)
+        show_presets: Afficher sélecteur formulations prédéfinies
     
     Returns:
-        Dictionnaire avec valeurs saisies
+        Dict avec composition (kg/m³)
+    
+    Example:
+        ```python
+        composition = render_formulation_input(key_suffix="page1")
+        # {'Ciment': 350.0, 'Eau': 175.0, ...}
+        ```
     """
-    formulation = {}
     
-    st.markdown("### 🧪 Composition Béton")
+    composition = {}
     
-    # 1. LIANTS HYDRAULIQUES
-    with st.expander("📦 Liants Hydrauliques", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            formulation["Ciment"] = create_slider_with_help(
-                label="Ciment CEM I/II",
-                min_value=bounds["Ciment"]["min"],
-                max_value=bounds["Ciment"]["max"],
-                value=default_values.get("Ciment", bounds["Ciment"]["default"]),
-                step=bounds["Ciment"]["step"],
-                unit="kg/m³",
-                help_text=bounds["Ciment"]["description"],
-                key=f"{key_prefix}_ciment"
-            )
-        
-        with col2:
-            formulation["Laitier"] = create_slider_with_help(
-                label="Laitier de Haut-Fourneau",
-                min_value=bounds["Laitier"]["min"],
-                max_value=bounds["Laitier"]["max"],
-                value=default_values.get("Laitier", bounds["Laitier"]["default"]),
-                step=bounds["Laitier"]["step"],
-                unit="kg/m³",
-                help_text=bounds["Laitier"]["description"],
-                key=f"{key_prefix}_laitier"
-            )
-        
-        with col3:
-            formulation["CendresVolantes"] = create_slider_with_help(
-                label="Cendres Volantes",
-                min_value=bounds["CendresVolantes"]["min"],
-                max_value=bounds["CendresVolantes"]["max"],
-                value=default_values.get("CendresVolantes", bounds["CendresVolantes"]["default"]),
-                step=bounds["CendresVolantes"]["step"],
-                unit="kg/m³",
-                help_text=bounds["CendresVolantes"]["description"],
-                key=f"{key_prefix}_cendres"
-            )
+    # ═══════════════════════════════════════════════════════════════
+    # SÉLECTEUR FORMULATIONS PRÉDÉFINIES
+    # ═══════════════════════════════════════════════════════════════
     
-    # 2. EAU & ADJUVANTS
-    with st.expander("💧 Eau & Adjuvants", expanded=True):
-        col1, col2 = st.columns(2)
+    if show_presets:
+        st.markdown("#### 📚 Formulations Prédéfinies")
         
-        with col1:
-            formulation["Eau"] = create_slider_with_help(
-                label="Eau de Gâchage",
-                min_value=bounds["Eau"]["min"],
-                max_value=bounds["Eau"]["max"],
-                value=default_values.get("Eau", bounds["Eau"]["default"]),
-                step=bounds["Eau"]["step"],
-                unit="L/m³",
-                help_text=bounds["Eau"]["description"],
-                key=f"{key_prefix}_eau"
-            )
+        preset_options = ["Personnalisée"] + list(PRESET_FORMULATIONS.keys())
         
-        with col2:
-            formulation["Superplastifiant"] = create_slider_with_help(
-                label="Superplastifiant",
-                min_value=bounds["Superplastifiant"]["min"],
-                max_value=bounds["Superplastifiant"]["max"],
-                value=default_values.get("Superplastifiant", bounds["Superplastifiant"]["default"]),
-                step=bounds["Superplastifiant"]["step"],
-                unit="kg/m³",
-                help_text=bounds["Superplastifiant"]["description"],
-                key=f"{key_prefix}_sp"
-            )
-    
-    # 3. GRANULATS
-    with st.expander("🪨 Granulats", expanded=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            formulation["GravilonsGros"] = create_slider_with_help(
-                label="Gravillons 4/20",
-                min_value=bounds["GravilonsGros"]["min"],
-                max_value=bounds["GravilonsGros"]["max"],
-                value=default_values.get("GravilonsGros", bounds["GravilonsGros"]["default"]),
-                step=bounds["GravilonsGros"]["step"],
-                unit="kg/m³",
-                help_text=bounds["GravilonsGros"]["description"],
-                key=f"{key_prefix}_gravi"
-            )
-        
-        with col2:
-            formulation["SableFin"] = create_slider_with_help(
-                label="Sable 0/4",
-                min_value=bounds["SableFin"]["min"],
-                max_value=bounds["SableFin"]["max"],
-                value=default_values.get("SableFin", bounds["SableFin"]["default"]),
-                step=bounds["SableFin"]["step"],
-                unit="kg/m³",
-                help_text=bounds["SableFin"]["description"],
-                key=f"{key_prefix}_sable"
-            )
-    
-    # 4. TEMPS
-    with st.expander("⏰ Paramètres Temporels"):
-        formulation["Age"] = create_slider_with_help(
-            label="Âge du Béton",
-            min_value=bounds["Age"]["min"],
-            max_value=bounds["Age"]["max"],
-            value=default_values.get("Age", bounds["Age"]["default"]),
-            step=bounds["Age"]["step"],
-            unit="jours",
-            help_text=bounds["Age"]["description"],
-            key=f"{key_prefix}_age"
+        selected_preset = st.selectbox(
+            label="Charger une formulation type",
+            options=preset_options,
+            index=0,
+            key=f"preset_selector_{key_suffix}",
+            help="Sélectionner une formulation standard comme point de départ"
         )
+        
+        # Si formulation prédéfinie sélectionnée, l'utiliser comme défaut
+        if selected_preset != "Personnalisée":
+            preset_data = PRESET_FORMULATIONS[selected_preset]
+            
+            # Mettre à jour les sliders via session_state
+            for param, value in preset_data.items():
+                if param in BOUNDS:
+                    slider_key = f"{param}_slider_{key_suffix}"
+                    if slider_key in st.session_state:
+                        st.session_state[slider_key] = float(value)
+            
+            # Afficher description
+            st.info(
+                f"ℹ️ **{selected_preset}** : {preset_data.get('description', '')}  \n"
+                f"*Classe : {preset_data.get('classe', 'N/A')} | "
+                f"Exposition : {preset_data.get('exposition', 'N/A')}*"
+            )
+        
+        st.markdown("---")
     
-    return formulation
+    # ═══════════════════════════════════════════════════════════════
+    # SLIDERS COMPOSITION
+    # ═══════════════════════════════════════════════════════════════
+    
+    st.markdown("#### ⚗️ Composition du Mélange")
+    
+    # Déterminer layout
+    if layout == "compact":
+        col1, col2 = st.columns(2)
+        columns = [col1, col2]
+    else:
+        columns = [st.container()]
+    
+    # Regroupement constituants
+    groups = {
+        "Liants": ['Ciment', 'Laitier', 'CendresVolantes'],
+        "Eau & Adjuvants": ['Eau', 'Superplastifiant'],
+        "Granulats": ['GravilonsGros', 'SableFin'],
+        "Maturation": ['Age']
+    }
+    
+    current_col = 0
+    
+    for group_name, params in groups.items():
+        with columns[current_col % len(columns)]:
+            st.markdown(f"**{group_name}**")
+            
+            for param in params:
+                if param not in BOUNDS:
+                    continue
+                
+                bounds = BOUNDS[param]
+                
+                # Valeur par défaut
+                if default_values and param in default_values:
+                    default_val = default_values[param]
+                else:
+                    default_val = bounds.get('default', bounds['min'])
+                
+                # Slider
+                value = st.slider(
+                    label=f"{LABELS_MAP.get(param, param)}",
+                    min_value=float(bounds['min']),
+                    max_value=float(bounds['max']),
+                    step=float(bounds.get('step', 1.0)),
+                    key=f"{param}_slider_{key_suffix}",
+                    help=f"{bounds.get('description', '')} ({bounds.get('unit', '')})"
+                )
+                
+                composition[param] = value
+        
+        # Alterner colonnes en mode compact
+        if layout == "compact":
+            current_col += 1
+    
+    # ═══════════════════════════════════════════════════════════════
+    # RÉSUMÉ RAPIDE
+    # ═══════════════════════════════════════════════════════════════
+    
+    with st.expander("📊 Résumé de la Formulation", expanded=False):
+        # Calculs rapides
+        liant_total = (
+            composition.get('Ciment', 0) +
+            composition.get('Laitier', 0) +
+            composition.get('CendresVolantes', 0)
+        )
+        ratio_el = composition.get('Eau', 0) / (liant_total + 1e-5) if liant_total > 0 else 0
+        
+        taux_sub = 0
+        if liant_total > 0:
+            taux_sub = (
+                (composition.get('Laitier', 0) + composition.get('CendresVolantes', 0)) /
+                liant_total * 100
+            )
+        
+        col_r1, col_r2, col_r3 = st.columns(3)
+        
+        with col_r1:
+            st.metric("Liant Total", f"{liant_total:.1f} kg/m³")
+        
+        with col_r2:
+            # Couleur selon seuil
+            color = "🟢" if ratio_el <= 0.50 else ("🟡" if ratio_el <= 0.60 else "🔴")
+            st.metric("Ratio E/L", f"{color} {ratio_el:.3f}")
+        
+        with col_r3:
+            st.metric("Substitution", f"{taux_sub:.1f}%")
+    
+    return composition
 
 
-def create_preset_selector(
-    presets: Dict[str, Dict[str, float]],
-    on_select: Optional[Callable[[Dict[str, float], str], None]] = None
-) -> Optional[Dict[str, float]]:
+def render_target_selector(
+    key_suffix: str = "",
+    show_description: bool = True
+) -> str:
     """
-    Sélecteur de formulations prédéfinies.
+    Sélecteur d'objectif pour optimisation.
     
     Args:
-        presets: Dictionnaire {nom: formulation}
-        on_select: Callback sur sélection
+        key_suffix: Suffixe clé Streamlit
+        show_description: Afficher description objectif
     
     Returns:
-        Formulation sélectionnée ou None
-    """
-    st.markdown("### 📋 Formulations Prédéfinies")
+        Nom objectif sélectionné (ex: "minimize_cost")
     
-    selected_preset = st.selectbox(
-        "Choisissez une formulation type :",
-        options=list(presets.keys()),
-        format_func=lambda x: f"{x} ({presets[x].get('classe', '')})"
+    Example:
+        ```python
+        objective = render_target_selector()
+        # "minimize_cost"
+        ```
+    """
+    
+    st.markdown("#### 🎯 Objectif d'Optimisation")
+    
+    # Mapping objectifs → Labels FR
+    objectives_map = {
+        "minimize_cost": {
+            "label": "💰 Minimiser le Coût",
+            "description": "Trouve la formulation la moins chère atteignant la résistance cible.",
+            "icon": "💰"
+        },
+        "minimize_co2": {
+            "label": "🌱 Minimiser l'Empreinte Carbone",
+            "description": "Optimise pour réduire les émissions de CO₂ tout en respectant la performance.",
+            "icon": "🌱"
+        },
+        "maximize_resistance": {
+            "label": "💪 Maximiser la Résistance",
+            "description": "Maximise la résistance en compression dans les contraintes de coût/matériaux.",
+            "icon": "💪"
+        },
+        "minimize_diffusion_cl": {
+            "label": "🧂 Minimiser Diffusion Chlorures",
+            "description": "Optimise la durabilité face à la corrosion (milieux marins, sels).",
+            "icon": "🧂"
+        },
+        "minimize_carbonatation": {
+            "label": "🌫️ Minimiser Carbonatation",
+            "description": "Améliore la durabilité face au vieillissement CO₂.",
+            "icon": "🌫️"
+        }
+    }
+    
+    # Sélecteur
+    objective_keys = list(objectives_map.keys())
+    objective_labels = [objectives_map[k]["label"] for k in objective_keys]
+    
+    selected_label = st.radio(
+        label="Choisir l'objectif principal",
+        options=objective_labels,
+        index=0,
+        key=f"objective_selector_{key_suffix}",
+        horizontal=False
     )
     
-    if selected_preset:
-        preset = presets[selected_preset]
-        
-        # Affichage info
-        with st.container():
-            st.markdown(f"""
-            <div style="background: #f8f9fa; padding: 1rem; border-radius: 10px; margin: 1rem 0;">
-                <h4>ℹ️ {selected_preset}</h4>
-                <p>{preset.get('description', '')}</p>
-                <div style="color: #666; font-size: 0.9rem;">
-                    <strong>Classe:</strong> {preset.get('classe', 'N/A')} • 
-                    <strong>Exposition:</strong> {preset.get('exposition', 'N/A')}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # Bouton appliquer
-        if st.button("✅ Appliquer cette formulation", use_container_width=True):
-            if on_select:
-                on_select(preset, selected_preset)
-            return preset
+    # Retrouver clé correspondante
+    selected_key = objective_keys[objective_labels.index(selected_label)]
     
-    return None
+    # Afficher description
+    if show_description:
+        objective_info = objectives_map[selected_key]
+        st.info(
+            f"{objective_info['icon']} **{objective_info['label']}**  \n"
+            f"{objective_info['description']}"
+        )
+    
+    return selected_key
 
 
-def create_validation_form(
-    formulation: Dict[str, float],
-    on_validate: Callable[[Dict[str, float]], None]
-) -> None:
+def render_constraints_input(
+    key_suffix: str = ""
+) -> Dict[str, float]:
     """
-    Formulaire de validation avec recommandations.
+    Saisie des contraintes pour optimisation.
     
     Args:
-        formulation: Formulation à valider
-        on_validate: Callback validation
-    """
-    st.markdown("### 🧪 Validation")
+        key_suffix: Suffixe clé
     
-    with st.container():
-        col1, col2 = st.columns(2)
+    Returns:
+        Dict avec contraintes
+    
+    Example:
+        ```python
+        constraints = render_constraints_input()
+        # {'target_resistance': 35.0, 'max_cost': 50.0, 'max_co2': 350.0}
+        ```
+    """
+    
+    st.markdown("#### ⚙️ Contraintes")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        target_resistance = st.number_input(
+            label="Résistance Minimale (MPa)",
+            min_value=10.0,
+            max_value=90.0,
+            value=30.0,
+            step=5.0,
+            key=f"target_resistance_{key_suffix}",
+            help="Résistance minimale requise à 28 jours"
+        )
         
-        with col1:
-            # Informations
-            liant_total = (
-                formulation.get("Ciment", 0) + 
-                formulation.get("Laitier", 0) + 
-                formulation.get("CendresVolantes", 0)
-            )
-            
-            eau = formulation.get("Eau", 0)
-            ratio_el = eau / (liant_total + 1e-5)
-            
-            st.metric("Liant Total", f"{liant_total:.0f} kg/m³")
-            st.metric("Ratio E/L", f"{ratio_el:.3f}")
+        max_cost = st.number_input(
+            label="Coût Maximal (€/m³)",
+            min_value=20.0,
+            max_value=200.0,
+            value=100.0,
+            step=10.0,
+            key=f"max_cost_{key_suffix}",
+            help="Budget maximal pour les matériaux"
+        )
+    
+    with col2:
+        max_co2 = st.number_input(
+            label="CO₂ Maximal (kg/m³)",
+            min_value=100.0,
+            max_value=600.0,
+            value=350.0,
+            step=50.0,
+            key=f"max_co2_{key_suffix}",
+            help="Empreinte carbone maximale tolérée"
+        )
         
-        with col2:
-            # Validation rapide
-            if ratio_el > 0.65:
-                st.error("⚠️ Ratio E/L > 0.65 - Non conforme EN 206 béton armé")
-            elif ratio_el > 0.60:
-                st.warning("⚠️ Ratio E/L élevé (0.60-0.65)")
-            elif ratio_el < 0.40:
-                st.success("✅ Ratio E/L excellent (< 0.40)")
-            else:
-                st.info("ℹ️ Ratio E/L acceptable")
-        
-        # Boutons d'action
-        col3, col4, col5 = st.columns([1, 1, 1])
-        
-        with col3:
-            if st.button("📊 Voir détails", use_container_width=True):
-                st.session_state["show_details"] = True
-        
-        with col4:
-            if st.button("🔄 Réinitialiser", use_container_width=True):
-                for key in formulation.keys():
-                    formulation[key] = 0
-        
-        with col5:
-            if st.button("✅ Valider & Prédire", type="primary", use_container_width=True):
-                on_validate(formulation)
+        max_el_ratio = st.number_input(
+            label="Ratio E/L Maximal",
+            min_value=0.30,
+            max_value=0.70,
+            value=0.55,
+            step=0.05,
+            key=f"max_el_{key_suffix}",
+            help="Ratio Eau/Liant maximal (durabilité)"
+        )
+    
+    return {
+        'target_resistance': target_resistance,
+        'max_cost': max_cost,
+        'max_co2': max_co2,
+        'max_el_ratio': max_el_ratio
+    }
 
 
 __all__ = [
-    "create_slider_with_help",
-    "create_formulation_form",
-    "create_preset_selector",
-    "create_validation_form"
+    'render_formulation_input',
+    'render_target_selector',
+    'render_constraints_input'
 ]

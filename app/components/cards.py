@@ -1,258 +1,335 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
 MODULE: app/components/cards.py
+Description: Composants de cartes réutilisables (métriques, formulations, alertes)
 Auteur: Stage R&D - IMT Nord Europe
-Fonction: Cartes UI stylisées (KPI, Formations, Info)
-Version: 2.0.0 - Production Ready
+Version: 1.0.0
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
-import streamlit as st  # type: ignore
-from typing import Optional, Dict, Any
+import streamlit as st
+from typing import Dict, List, Optional, Callable, Any
+import logging
+
+from config.settings import UI_SETTINGS
+from config.constants import STATUS_EMOJI, COLOR_PALETTE, QUALITY_THRESHOLDS
+from app.core.validator import ValidationAlert, Severity
+
+logger = logging.getLogger(__name__)
 
 
-def render_kpi_card(
+def metric_card(
     title: str,
-    value: Any,
+    value: float,
+    unit: str = "",
     delta: Optional[float] = None,
-    delta_label: str = "",
-    color: str = "blue",
-    icon: str = "",
-    unit: str = ""
+    icon: str = "📊",
+    help_text: Optional[str] = None,
+    quality_grade: Optional[str] = None,
+    key: Optional[str] = None  # Ajout optionnel pour unicité
 ) -> None:
     """
-    Affiche une carte KPI moderne avec tendance.
-    
-    Args:
-        title: Titre de la métrique
-        value: Valeur principale
-        delta: Variation (positif = vert, négatif = rouge)
-        delta_label: Libellé delta (ex: "cette semaine")
-        color: Couleur thème (blue, green, purple, orange)
-        icon: Emoji ou icône
-        unit: Unité (%, €, kg, etc.)
+    Carte métrique stylisée – version moderne et stable (st.html + structure claire)
     """
-    # Palette de couleurs
-    color_palette = {
-        "blue": {
-            "border": "#1976D2",
-            "bg": "#E3F2FD",
-            "delta_positive": "#1565C0",
-            "delta_negative": "#D32F2F"
-        },
-        "green": {
-            "border": "#388E3C",
-            "bg": "#E8F5E9",
-            "delta_positive": "#2E7D32",
-            "delta_negative": "#D32F2F"
-        },
-        "purple": {
-            "border": "#7B1FA2",
-            "bg": "#F3E5F5",
-            "delta_positive": "#6A1B9A",
-            "delta_negative": "#D32F2F"
-        },
-        "orange": {
-            "border": "#FF6F00",
-            "bg": "#FFF3E0",
-            "delta_positive": "#E65100",
-            "delta_negative": "#D32F2F"
-        }
-    }
-    
-    # Déterminer couleurs
-    colors = color_palette.get(color, color_palette["blue"])
-    
-    # Format valeur
-    if isinstance(value, (int, float)):
-        display_value = f"{value:,.0f}"
+    # Déterminer couleur et emoji selon grade
+    if quality_grade and quality_grade in QUALITY_THRESHOLDS:
+        card_color = COLOR_PALETTE.get(QUALITY_THRESHOLDS[quality_grade]["color"], COLOR_PALETTE["primary"])
+        emoji = STATUS_EMOJI.get(quality_grade, "")
     else:
-        display_value = str(value)
-    
-    if unit:
-        display_value = f"{display_value}{unit}"
-    
-    # Format delta
+        card_color = COLOR_PALETTE["primary"]
+        emoji = ""
+
+    # Formatage propre de la valeur
+    value_str = f"{value:,.1f}" if abs(value) >= 1000 else f"{value:.1f}" if abs(value) >= 10 else f"{value:.2f}"
+
+    # Delta (optionnel)
     delta_html = ""
     if delta is not None:
-        delta_color = colors["delta_positive"] if delta >= 0 else colors["delta_negative"]
-        delta_symbol = "↗" if delta >= 0 else "↘"
-        delta_html = f"""
-        <div style="margin-top: 8px; color: {delta_color}; font-weight: 600;">
-            {delta_symbol} {abs(delta):.1f} {delta_label}
-        </div>
-        """
-    
-    st.markdown(f"""
-    <div style="
-        background: linear-gradient(135deg, {colors['bg']} 0%, white 100%);
-        padding: 1.5rem;
-        border-radius: 15px;
-        border-left: 5px solid {colors['border']};
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        height: 180px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        transition: transform 0.3s ease;
+        delta_color = COLOR_PALETTE["success"] if delta >= 0 else COLOR_PALETTE["danger"]
+        delta_symbol = "↑" if delta >= 0 else "↓"
+        delta_html = f'<span style="color:{delta_color};font-size:0.9rem;margin-left:0.5rem;">{delta_symbol} {abs(delta):.1f}</span>'
+
+    # HTML pur – sans markdown mélangé
+    card_html = f"""
+    <div class="custom-metric-card" style="
+        background: linear-gradient(135deg, {card_color}15 0%, {card_color}05 100%);
+        border-left: 4px solid {card_color};
+        border-radius: 8px;
+        padding: 1.2rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.08);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     ">
-        <div>
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
-                <span style="font-size: 2em;">{icon}</span>
-                <h3 style="margin: 0; color: {colors['border']}; font-size: 1.1rem;">
-                    {title}
-                </h3>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <div style="
+                    color: {UI_SETTINGS['colors']['dark']};
+                    font-size: 0.9rem;
+                    margin-bottom: 0.4rem;
+                    opacity: 0.8;
+                ">
+                    {icon} {title}
+                </div>
+                <div style="
+                    color: {card_color};
+                    font-size: 2.4rem;
+                    font-weight: 700;
+                    line-height: 1.1;
+                ">
+                    {value_str}
+                    <span style="font-size: 1.1rem; font-weight: 400; opacity: 0.9;">{unit}</span>
+                    {delta_html}
+                </div>
             </div>
-            <div style="font-size: 2.5rem; font-weight: 700; color: #333;">
-                {display_value}
+            <div style="font-size: 3rem; opacity: 0.25;">
+                {emoji}
             </div>
         </div>
-        {delta_html}
     </div>
-    """, unsafe_allow_html=True)
+
+    <style>
+        .custom-metric-card:hover {{
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+        }}
+    </style>
+    """
+
+    # Injection via st.html – beaucoup plus fiable
+    st.html(card_html)
+
+    # Help text dans expander
+    if help_text:
+        with st.expander("Détails", expanded=False):
+            st.caption(help_text)
 
 
-def render_info_card(
-    title: str,
-    content: str,
-    icon: str = "ℹ️",
-    color: str = "blue",
-    width: str = "100%"
+def formulation_card(
+    composition: Dict[str, float],
+    predictions: Dict[str, float],
+    name: str = "Formulation",
+    on_select: Optional[Callable] = None,
+    show_actions: bool = True
 ) -> None:
     """
-    Carte d'information avec icône et contenu.
+    Carte affichant une formulation avec ses prédictions.
     
     Args:
-        title: Titre de la carte
-        content: Contenu HTML/Markdown
-        icon: Emoji icône
-        color: Couleur (blue, green, yellow, red)
-        width: Largeur CSS
+        composition: Composition béton (kg/m³)
+        predictions: Résultats prédiction
+        name: Nom formulation
+        on_select: Callback sélection
+        show_actions: Afficher boutons d'action
+    
+    Example:
+        ```python
+        formulation_card(
+            composition={'Ciment': 350, 'Eau': 175, ...},
+            predictions={'Resistance': 45.2, ...},
+            name="C35/45 HP"
+        )
+        ```
     """
-    colors = {
-        "blue": {"border": "#1976D2", "bg": "#E3F2FD"},
-        "green": {"border": "#388E3C", "bg": "#E8F5E9"},
-        "yellow": {"border": "#F57C00", "bg": "#FFF3E0"},
-        "red": {"border": "#D32F2F", "bg": "#FFEBEE"}
+    
+    with st.container():
+        # Header
+        st.markdown(
+            f"""
+            <div style="
+                background: {COLOR_PALETTE['primary']};
+                color: white;
+                padding: 0.75rem 1rem;
+                border-radius: 8px 8px 0 0;
+                font-weight: 600;
+            ">
+                🧪 {name}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        
+        # Contenu
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.markdown("**📦 Composition**")
+            
+            # Constituants principaux
+            key_components = ['Ciment', 'Laitier', 'CendresVolantes', 'Eau', 'Superplastifiant']
+            for comp in key_components:
+                value = composition.get(comp, 0)
+                if value > 0:
+                    st.caption(f"• {comp}: **{value:.1f}** kg/m³")
+            
+            # Ratio E/L
+            if 'Ratio_E_L' in predictions:
+                st.caption(f"• Ratio E/L: **{predictions['Ratio_E_L']:.3f}**")
+        
+        with col2:
+            st.markdown("**🎯 Prédictions**")
+            
+            # Résistance
+            resistance = predictions.get('Resistance', 0)
+            st.caption(f"💪 Résistance: **{resistance:.1f}** MPa")
+            
+            # Diffusion Cl⁻
+            diffusion = predictions.get('Diffusion_Cl', 0)
+            st.caption(f"🧂 Diffusion Cl⁻: **{diffusion:.2f}** ×10⁻¹²")
+            
+            # Carbonatation
+            carbonatation = predictions.get('Carbonatation', 0)
+            st.caption(f"🌫️ Carbonatation: **{carbonatation:.1f}** mm")
+        
+        # Actions
+        if show_actions:
+            st.markdown("---")
+            col_a, col_b, col_c = st.columns(3)
+            
+            with col_a:
+                if st.button("📊 Analyser", key=f"analyze_{name}", width="stretch"):
+                    if on_select:
+                        on_select(composition, predictions)
+            
+            with col_b:
+                if st.button("⭐ Favori", key=f"fav_{name}", width="stretch"):
+                    st.toast(f"✅ {name} ajouté aux favoris", icon="⭐")
+            
+            with col_c:
+                if st.button("📥 Export", key=f"export_{name}", width="stretch"):
+                    st.toast("📥 Export en cours...", icon="⏳")
+
+
+def alert_banner(
+    alerts: List[ValidationAlert],
+    max_display: int = 5
+) -> None:
+    """
+    Affiche les alertes de validation avec couleurs par sévérité.
+    
+    Args:
+        alerts: Liste ValidationAlert
+        max_display: Nombre max d'alertes affichées
+    
+    Example:
+        ```python
+        alerts = [
+            ValidationAlert(
+                severity=Severity.WARNING,
+                category="Ratio E/L",
+                message="Ratio élevé",
+                recommendation="Réduire eau"
+            )
+        ]
+        alert_banner(alerts)
+        ```
+    """
+    
+    if not alerts:
+        st.success("✅ Aucune alerte - Formulation conforme", icon="✅")
+        return
+    
+    # Trier par sévérité (CRITICAL > ERROR > WARNING > INFO)
+    severity_order = {
+        Severity.CRITICAL: 0,
+        Severity.ERROR: 1,
+        Severity.WARNING: 2,
+        Severity.INFO: 3
     }
+    sorted_alerts = sorted(alerts, key=lambda a: severity_order.get(a.severity, 4))
     
-    color_scheme = colors.get(color, colors["blue"])
+    # Limiter affichage
+    display_alerts = sorted_alerts[:max_display]
+    hidden_count = len(alerts) - max_display
     
+    st.markdown(f"### 🚨 Alertes de Validation ({len(alerts)})")
+    
+    for alert in display_alerts:
+        # Déterminer style selon sévérité
+        if alert.severity == Severity.CRITICAL:
+            alert_type = "error"
+            icon = "🔴"
+            border_color = COLOR_PALETTE["danger"]
+        elif alert.severity == Severity.ERROR:
+            alert_type = "error"
+            icon = "❌"
+            border_color = COLOR_PALETTE["danger"]
+        elif alert.severity == Severity.WARNING:
+            alert_type = "warning"
+            icon = "⚠️"
+            border_color = COLOR_PALETTE["warning"]
+        else:  # INFO
+            alert_type = "info"
+            icon = "ℹ️"
+            border_color = COLOR_PALETTE["info"]
+        
+        # Créer message structuré
+        message_parts = [
+            f"**{icon} {alert.category}**",
+            f"\n\n{alert.message}",
+            f"\n\n💡 **Recommandation** : {alert.recommendation}"
+        ]
+        
+        if alert.norm_ref:
+            message_parts.append(f"\n\n📖 *Norme : {alert.norm_ref}*")
+        
+        full_message = "".join(message_parts)
+        
+        # Afficher
+        if alert_type == "error":
+            st.error(full_message, icon=icon)
+        elif alert_type == "warning":
+            st.warning(full_message, icon=icon)
+        else:
+            st.info(full_message, icon=icon)
+    
+    # Alertes masquées
+    if hidden_count > 0:
+        with st.expander(f"➕ Afficher {hidden_count} alerte(s) supplémentaire(s)"):
+            for alert in sorted_alerts[max_display:]:
+                st.caption(f"{STATUS_EMOJI.get(alert.severity.value, '')} **{alert.category}** : {alert.message}")
+
+
+from markdown import markdown
+from markdown.extensions.extra import ExtraExtension
+
+def info_box(title: str, content: str, icon: str = "ℹ️", color: str = "primary") -> None:
+    color_value = COLOR_PALETTE.get(color, COLOR_PALETTE["primary"])
+    
+    # Nettoyage du content : s'assurer que c'est une string pure
+    if not isinstance(content, str):
+        content = str(content)  # évite [object Object]
+    
+    # Conversion markdown → HTML
+    html_content = markdown(
+        content.strip(),  # retire espaces inutiles
+        extensions=['extra', 'sane_lists', 'nl2br'],  # nl2br pour sauts de ligne
+        output_format='html5'
+    )
+    
+    # Injection via st.html (plus stable que st.markdown pour du HTML pur)
     st.markdown(f"""
     <div style="
-        background: white;
-        border: 2px solid {color_scheme['border']};
-        border-left: 6px solid {color_scheme['border']};
-        border-radius: 10px;
-        padding: 1.5rem;
+        background: {color_value}15;
+        border-left: 4px solid {color_value};
+        border-radius: 8px;
+        padding: 1.2rem;
         margin: 1rem 0;
-        width: {width};
+        line-height: 1.6;
     ">
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
-            <span style="font-size: 1.5em;">{icon}</span>
-            <h4 style="margin: 0; color: {color_scheme['border']};">{title}</h4>
+        <div style="display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.8rem;">
+            <span style="font-size: 1.6rem;">{icon}</span>
+            <h4 style="margin: 0; color: {color_value}; font-weight: 600;">{title}</h4>
         </div>
-        <div style="color: #444; line-height: 1.6;">
-            {content}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def render_formulation_card(
-    formulation: Dict[str, float],
-    name: str,
-    index: int,
-    on_select=None
-) -> None:
-    """
-    Carte pour afficher une formulation béton.
-    
-    Args:
-        formulation: Dictionnaire composition
-        name: Nom de la formulation
-        index: Index unique
-        on_select: Fonction callback si cliquée
-    """
-    # Formatage valeurs principales
-    resistance = formulation.get("Resistance", 0)
-    ratio_el = formulation.get("Ratio_E_L", 0)
-    cost = formulation.get("Cost", 0)
-    
-    # Couleur selon performance
-    if resistance >= 40:
-        border_color = "#388E3C"  # Vert
-        performance = "Haute Performance"
-    elif resistance >= 25:
-        border_color = "#1976D2"  # Bleu
-        performance = "Standard"
-    else:
-        border_color = "#F57C00"  # Orange
-        performance = "Faible Performance"
-    
-    st.markdown(f"""
-    <div style="
-        background: white;
-        border: 2px solid {border_color};
-        border-radius: 12px;
-        padding: 1.25rem;
-        margin: 0.5rem 0;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        box-shadow: 0 3px 6px rgba(0,0,0,0.05);
-    "
-    onmouseover="this.style.boxShadow='0 6px 12px rgba(0,0,0,0.1)'; this.style.transform='translateY(-2px)';"
-    onmouseout="this.style.boxShadow='0 3px 6px rgba(0,0,0,0.05)'; this.style.transform='translateY(0)';"
-    >
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h4 style="margin: 0; color: #333;">{name}</h4>
-            <span style="background: {border_color}; color: white; padding: 4px 12px; 
-                         border-radius: 20px; font-size: 0.85rem; font-weight: 600;">
-                {performance}
-            </span>
-        </div>
-        
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-            <div>
-                <div style="font-size: 0.9rem; color: #666;">Résistance</div>
-                <div style="font-size: 1.5rem; font-weight: 700; color: #333;">
-                    {resistance:.1f} MPa
-                </div>
-            </div>
-            <div>
-                <div style="font-size: 0.9rem; color: #666;">Ratio E/L</div>
-                <div style="font-size: 1.5rem; font-weight: 700; color: #333;">
-                    {ratio_el:.2f}
-                </div>
-            </div>
-            <div>
-                <div style="font-size: 0.9rem; color: #666;">Coût estimé</div>
-                <div style="font-size: 1.5rem; font-weight: 700; color: #333;">
-                    {cost:.0f} €/m³
-                </div>
-            </div>
-        </div>
-        
-        <div style="color: #666; font-size: 0.9rem; border-top: 1px solid #eee; 
-                    padding-top: 10px;">
-            Ciment: {formulation.get('Ciment', 0):.0f} kg/m³ • 
-            Eau: {formulation.get('Eau', 0):.0f} L/m³ • 
-            Laitier: {formulation.get('Laitier', 0):.0f} kg/m³
+        <div style="color: {UI_SETTINGS['colors']['dark']};">
+            {html_content}
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Bouton de sélection
-    if on_select and st.button(
-        "🔍 Voir détails",
-        key=f"btn_view_{index}",
-        use_container_width=True
-    ):
-        on_select(formulation, name)
 
 
 __all__ = [
-    "render_kpi_card",
-    "render_info_card",
-    "render_formulation_card"
+    'metric_card',
+    'formulation_card',
+    'alert_banner',
+    'info_box'
 ]

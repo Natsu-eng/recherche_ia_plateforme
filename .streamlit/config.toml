@@ -1,0 +1,49 @@
+# ═══════════════════════════════════════
+# STREAMLIT CONFIGURATION - PRODUCTION
+# Compatible Streamlit 1.54+
+# ═══════════════════════════════════════
+
+# ─── THÈME ───
+[theme]
+primaryColor = "#1e3c72"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#262730"
+font = "sans serif"
+
+# ─── SERVEUR ───
+[server]
+port = 8501
+address = "0.0.0.0"
+headless = true
+runOnSave = true
+maxUploadSize = 200
+maxMessageSize = 200
+#enableCORS = false
+#enableXsrfProtection = true
+fileWatcherType = "auto"   # ✅ CORRECTION ICI
+
+# ─── NAVIGATEUR ───
+[browser]
+serverAddress = "localhost"
+serverPort = 8501
+gatherUsageStats = false
+
+# ─── CLIENT ───
+[client]
+showErrorDetails = true
+toolbarMode = "auto"
+
+# ─── LOGGER ───
+[logger]
+level = "info"
+messageFormat = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# ─── RUNNER ───
+[runner]
+magicEnabled = true
+fastReruns = true
+
+# ─── UI ───
+[ui]
+hideTopBar = false
