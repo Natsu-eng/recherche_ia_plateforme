@@ -1,9 +1,9 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
 PAGE: Formulateur - Prédiction des Propriétés du Béton
-Fichier: app/pages/1_Formulateur.py
+Fichier: pages/1_Formulateur.py
 Auteur: Stage R&D - IMT Nord Europe
-Version: 1.0.0
+Version: 1.1.0 - VERSION FINALE
 ═══════════════════════════════════════════════════════════════════════════════
 
 Fonctionnalités:
@@ -12,6 +12,14 @@ Fonctionnalités:
 - Validation normes EN 206
 - Export résultats (PDF/CSV)
 - Sauvegarde en base de données
+
+CORRECTIFS v1.1.0:
+✅ Persistance des résultats après clic bouton
+✅ Boutons déplacés hors du bloc conditionnel
+✅ Flag 'show_results' pour maintenir l'affichage
+✅ Messages de succès/erreur clairs
+✅ Compteurs (Prédictions, Sauvegardes, Favoris) fonctionnels
+✅ Incrémentation automatique des compteurs
 """
 
 import psycopg2
@@ -49,6 +57,19 @@ apply_custom_theme(st.session_state.get('app_theme', 'Clair'))
 
 # Sidebar
 render_sidebar(db_manager=st.session_state.get('db_manager'))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INITIALISATION COMPTEURS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if 'prediction_count' not in st.session_state:
+    st.session_state['prediction_count'] = 0
+
+if 'total_saves' not in st.session_state:
+    st.session_state['total_saves'] = 0
+
+if 'favorites' not in st.session_state:
+    st.session_state['favorites'] = []
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HEADER
@@ -102,7 +123,7 @@ with col_input:
     predict_button = st.button(
         label="🚀 Lancer la Prédiction",
         type="primary",
-        width="stretch"
+        width='stretch'
     )
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -112,11 +133,11 @@ with col_input:
 with col_results:
     st.markdown("## 🎯 Résultats de Prédiction")
     
+    # ═══════════════════════════════════════════════════════════════
+    # DÉCLENCHEMENT PRÉDICTION
+    # ═══════════════════════════════════════════════════════════════
+    
     if predict_button:
-        # ═══════════════════════════════════════════════════════════════
-        # PRÉDICTION
-        # ═══════════════════════════════════════════════════════════════
-        
         with st.spinner("🔄 Calcul en cours..."):
             try:
                 # Récupérer modèle et features
@@ -135,272 +156,23 @@ with col_results:
                     validate=True
                 )
                 
-                # Stocker dans session_state
+                # Stocker dans session_state avec flag d'affichage
                 st.session_state['last_prediction'] = {
                     'composition': composition,
                     'predictions': predictions,
                     'timestamp': datetime.now(),
                     'name': formulation_name
                 }
+                st.session_state['show_results'] = True
                 
-                # ───────────────────────────────────────────────────────
-                # AFFICHAGE RÉSULTATS
-                # ───────────────────────────────────────────────────────
+                # ✅ INCRÉMENTER COMPTEUR PRÉDICTIONS
+                st.session_state['prediction_count'] += 1
                 
                 st.success("✅ Prédiction réussie !")
                 
-                # Métriques principales
-                st.markdown("### 📈 Propriétés Prédites")
-                
-                col_m1, col_m2, col_m3 = st.columns(3)
-                
-                with col_m1:
-                    # Déterminer grade résistance
-                    resistance = predictions['Resistance']
-                    if resistance >= 50:
-                        grade_r = "excellent"
-                    elif resistance >= 35:
-                        grade_r = "bon"
-                    elif resistance >= 25:
-                        grade_r = "moyen"
-                    else:
-                        grade_r = "faible"
-                    
-                    metric_card(
-                        title="Résistance",
-                        value=resistance,
-                        unit="MPa",
-                        icon="💪",
-                        quality_grade=grade_r,
-                        help_text="Résistance en compression à 28 jours"
-                    )
-                
-                with col_m2:
-                    # Grade diffusion chlorures
-                    diffusion = predictions['Diffusion_Cl']
-                    if diffusion < 5:
-                        grade_d = "excellent"
-                    elif diffusion < 8:
-                        grade_d = "bon"
-                    elif diffusion < 12:
-                        grade_d = "moyen"
-                    else:
-                        grade_d = "faible"
-                    
-                    metric_card(
-                        title="Diffusion Cl⁻",
-                        value=diffusion,
-                        unit="×10⁻¹² m²/s",
-                        icon="🧂",
-                        quality_grade=grade_d,
-                        help_text="Coefficient de diffusion des ions chlorures"
-                    )
-                
-                with col_m3:
-                    # Grade carbonatation
-                    carbonatation = predictions['Carbonatation']
-                    if carbonatation < 10:
-                        grade_c = "excellent"
-                    elif carbonatation < 15:
-                        grade_c = "bon"
-                    elif carbonatation < 20:
-                        grade_c = "moyen"
-                    else:
-                        grade_c = "faible"
-                    
-                    metric_card(
-                        title="Carbonatation",
-                        value=carbonatation,
-                        unit="mm",
-                        icon="🌫️",
-                        quality_grade=grade_c,
-                        help_text="Profondeur de carbonatation à 1 an"
-                    )
-                
-                # ───────────────────────────────────────────────────────
-                # INDICATEURS COMPLÉMENTAIRES
-                # ───────────────────────────────────────────────────────
-                
-                st.markdown("### 📊 Indicateurs Techniques")
-                
-                col_i1, col_i2, col_i3 = st.columns(3)
-                
-                with col_i1:
-                    st.metric(
-                        label="Liant Total",
-                        value=f"{predictions['Liant_Total']:.0f} kg/m³"
-                    )
-                
-                with col_i2:
-                    ratio_el = predictions['Ratio_E_L']
-                    color_el = "🟢" if ratio_el <= 0.50 else ("🟡" if ratio_el <= 0.60 else "🔴")
-                    st.metric(
-                        label="Ratio E/L",
-                        value=f"{color_el} {ratio_el:.3f}"
-                    )
-                
-                with col_i3:
-                    taux_sub = predictions.get('Pct_Substitution', 0) * 100
-                    st.metric(
-                        label="Substitution",
-                        value=f"{taux_sub:.1f}%"
-                    )
-                
-                # ───────────────────────────────────────────────────────
-                # VALIDATION NORMATIVE
-                # ───────────────────────────────────────────────────────
-                
-                st.markdown("---")
-                st.markdown("### 🔍 Validation Normative (EN 206)")
-                
-                # Valider
-                validation_report = validate_formulation(
-                    composition=composition,
-                    predictions=predictions
-                )
-                
-                # Afficher alertes
-                alert_banner(validation_report.alerts, max_display=5)
-                
-                # Score de conformité
-                col_v1, col_v2, col_v3 = st.columns(3)
-                
-                with col_v1:
-                    compliance_score = validation_report.compliance_score
-                    color_score = (
-                        "🟢" if compliance_score >= 80 else
-                        ("🟡" if compliance_score >= 60 else "🔴")
-                    )
-                    st.metric(
-                        label="Score Conformité",
-                        value=f"{color_score} {compliance_score:.0f}/100"
-                    )
-                
-                with col_v2:
-                    st.metric(
-                        label="Classe Résistance",
-                        value=validation_report.resistance_class or "N/A"
-                    )
-                
-                with col_v3:
-                    st.metric(
-                        label="Classe Exposition",
-                        value=validation_report.exposure_class or "N/A"
-                    )
-                
-                # ───────────────────────────────────────────────────────
-                # VISUALISATIONS
-                # ───────────────────────────────────────────────────────
-                
-                st.markdown("---")
-                st.markdown("### 📊 Visualisations")
-                
-                tab_comp, tab_perf = st.tabs(["Composition", "Performance"])
-                
-                with tab_comp:
-                    fig_pie = plot_composition_pie(composition)
-                    st.plotly_chart(fig_pie, width="stretch")
-                
-                with tab_perf:
-                    fig_radar = plot_performance_radar(predictions, name=formulation_name)
-                    st.plotly_chart(fig_radar, width="stretch")
-                
-                # ───────────────────────────────────────────────────────
-                # ACTIONS
-                # ───────────────────────────────────────────────────────
-                
-                st.markdown("---")
-                st.markdown("### ⚡ Actions Rapides")
-                
-                col_act1, col_act2, col_act3 = st.columns(3)
-                
-                # Bouton Sauvegarder
-                with col_act1:
-                    save_button = st.button(
-                        "💾 Sauvegarder",
-                        use_container_width=True,  # ← CORRIGÉ
-                        type="primary",
-                        key="save_formulation_btn"
-                    )
-                
-                # Bouton Favoris
-                with col_act2:
-                    fav_button = st.button(
-                        "⭐ Favoris",
-                        use_container_width=True,  # ← CORRIGÉ
-                        key="fav_btn"
-                    )
-                
-                # Bouton Export
-                with col_act3:
-                    export_button = st.button(
-                        "📥 Export CSV",
-                        use_container_width=True,  # ← CORRIGÉ
-                        key="export_btn"
-                    )
-                
-                # ═══════════════════════════════════════════════════════════
-                # TRAITEMENT SAUVEGARDE
-                # ═══════════════════════════════════════════════════════════
-                
-                if save_button:
-                    db_manager = st.session_state.get('db_manager')
-                    
-                    if not db_manager:
-                        st.error("❌ Base de données non connectée")
-                    elif not db_manager.is_connected:
-                        st.error("❌ Base de données hors ligne")
-                    else:
-                        try:
-                            with st.spinner("💾 Sauvegarde..."):
-                                logger.info(f"Sauvegarde: {formulation_name}")
-                                
-                                success = db_manager.save_prediction(
-                                    formulation=composition,
-                                    predictions=predictions,
-                                    formulation_name=formulation_name
-                                )
-                                
-                                if success:
-                                    st.success("Formulation sauvegardée !")
-                                    st.balloons()
-                                    logger.info("Sauvegarde réussie")
-                                else:
-                                    st.error("Échec sauvegarde")
-                                    logger.error("save_prediction = False")
-                        
-                        except Exception as e:
-                            st.error(f"❌ Erreur: {str(e)}")
-                            logger.error(f"Exception: {e}", exc_info=True)
-                
-                # Favoris
-                if fav_button:
-                    if 'favorites' not in st.session_state:
-                        st.session_state['favorites'] = []
-                    st.session_state['favorites'].append({
-                        'name': formulation_name,
-                        'composition': composition,
-                        'predictions': predictions,
-                        'timestamp': datetime.now()
-                    })
-                    st.toast(f"⭐ {formulation_name} ajouté aux favoris")
-                
-                # Export CSV
-                if export_button:
-                    import pandas as pd
-                    export_data = {**composition, **predictions, 'Nom': formulation_name}
-                    df = pd.DataFrame([export_data])
-                    csv = df.to_csv(index=False)
-                    st.download_button(
-                        "⬇️ Télécharger",
-                        csv,
-                        f"{formulation_name}.csv",
-                        "text/csv",
-                        use_container_width=True
-                    )
-                
             except ValueError as e:
                 st.error(f"**Erreur de validation** : {e}")
+                st.session_state['show_results'] = False
             
             except Exception as e:
                 logger.error(f"Erreur prédiction: {e}", exc_info=True)
@@ -408,11 +180,330 @@ with col_results:
                     f"**Erreur lors de la prédiction** : {e}  \n\n"
                     "Veuillez vérifier votre composition et réessayer."
                 )
+                st.session_state['show_results'] = False
     
-    else:
-        # ═══════════════════════════════════════════════════════════════
-        # ÉTAT INITIAL (AVANT PRÉDICTION)
-        # ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
+    # AFFICHAGE RÉSULTATS (persiste après rerun)
+    # ═══════════════════════════════════════════════════════════════
+    
+    if st.session_state.get('show_results') and st.session_state.get('last_prediction'):
+        
+        last = st.session_state['last_prediction']
+        predictions = last['predictions']
+        composition = last['composition']
+        formulation_name = last['name']
+        
+        # ───────────────────────────────────────────────────────────
+        # MÉTRIQUES PRINCIPALES
+        # ───────────────────────────────────────────────────────────
+        
+        st.markdown("### 📈 Propriétés Prédites")
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        
+        with col_m1:
+            # Déterminer grade résistance
+            resistance = predictions['Resistance']
+            if resistance >= 50:
+                grade_r = "excellent"
+            elif resistance >= 35:
+                grade_r = "bon"
+            elif resistance >= 25:
+                grade_r = "moyen"
+            else:
+                grade_r = "faible"
+            
+            metric_card(
+                title="Résistance",
+                value=resistance,
+                unit="MPa",
+                icon="💪",
+                quality_grade=grade_r,
+                help_text="Résistance en compression à 28 jours"
+            )
+        
+        with col_m2:
+            # Grade diffusion chlorures
+            diffusion = predictions['Diffusion_Cl']
+            if diffusion < 5:
+                grade_d = "excellent"
+            elif diffusion < 8:
+                grade_d = "bon"
+            elif diffusion < 12:
+                grade_d = "moyen"
+            else:
+                grade_d = "faible"
+            
+            metric_card(
+                title="Diffusion Cl⁻",
+                value=diffusion,
+                unit="×10⁻¹² m²/s",
+                icon="🧂",
+                quality_grade=grade_d,
+                help_text="Coefficient de diffusion des ions chlorures"
+            )
+        
+        with col_m3:
+            # Grade carbonatation
+            carbonatation = predictions['Carbonatation']
+            if carbonatation < 10:
+                grade_c = "excellent"
+            elif carbonatation < 15:
+                grade_c = "bon"
+            elif carbonatation < 20:
+                grade_c = "moyen"
+            else:
+                grade_c = "faible"
+            
+            metric_card(
+                title="Carbonatation",
+                value=carbonatation,
+                unit="mm",
+                icon="🌫️",
+                quality_grade=grade_c,
+                help_text="Profondeur de carbonatation à 1 an"
+            )
+        
+        # ───────────────────────────────────────────────────────────
+        # INDICATEURS COMPLÉMENTAIRES
+        # ───────────────────────────────────────────────────────────
+        
+        st.markdown("### 📊 Indicateurs Techniques")
+        
+        col_i1, col_i2, col_i3 = st.columns(3)
+        
+        with col_i1:
+            st.metric(
+                label="Liant Total",
+                value=f"{predictions['Liant_Total']:.0f} kg/m³"
+            )
+        
+        with col_i2:
+            ratio_el = predictions['Ratio_E_L']
+            color_el = "🟢" if ratio_el <= 0.50 else ("🟡" if ratio_el <= 0.60 else "🔴")
+            st.metric(
+                label="Ratio E/L",
+                value=f"{color_el} {ratio_el:.3f}"
+            )
+        
+        with col_i3:
+            taux_sub = predictions.get('Pct_Substitution', 0) * 100
+            st.metric(
+                label="Substitution",
+                value=f"{taux_sub:.1f}%"
+            )
+        
+        # ───────────────────────────────────────────────────────────
+        # VALIDATION NORMATIVE
+        # ───────────────────────────────────────────────────────────
+        
+        st.markdown("---")
+        st.markdown("### 🔍 Validation Normative (EN 206)")
+        
+        # Valider
+        validation_report = validate_formulation(
+            composition=composition,
+            predictions=predictions
+        )
+        
+        # Afficher alertes
+        alert_banner(validation_report.alerts, max_display=5)
+        
+        # Score de conformité
+        col_v1, col_v2, col_v3 = st.columns(3)
+        
+        with col_v1:
+            compliance_score = validation_report.compliance_score
+            color_score = (
+                "🟢" if compliance_score >= 80 else
+                ("🟡" if compliance_score >= 60 else "🔴")
+            )
+            st.metric(
+                label="Score Conformité",
+                value=f"{color_score} {compliance_score:.0f}/100"
+            )
+        
+        with col_v2:
+            st.metric(
+                label="Classe Résistance",
+                value=validation_report.resistance_class or "N/A"
+            )
+        
+        with col_v3:
+            st.metric(
+                label="Classe Exposition",
+                value=validation_report.exposure_class or "N/A"
+            )
+        
+        # ───────────────────────────────────────────────────────────
+        # VISUALISATIONS
+        # ───────────────────────────────────────────────────────────
+        
+        st.markdown("---")
+        st.markdown("### 📊 Visualisations")
+        
+        tab_comp, tab_perf = st.tabs(["Composition", "Performance"])
+        
+        with tab_comp:
+            fig_pie = plot_composition_pie(composition)
+            st.plotly_chart(fig_pie, width='stretch')
+        
+        with tab_perf:
+            fig_radar = plot_performance_radar(predictions, name=formulation_name)
+            st.plotly_chart(fig_radar, width='stretch')
+        
+        # ───────────────────────────────────────────────────────────
+        # ACTIONS
+        # ───────────────────────────────────────────────────────────
+        
+        st.markdown("---")
+        st.markdown("### ⚡ Actions Rapides")
+        
+        col_act1, col_act2, col_act3 = st.columns(3)
+        
+        # Bouton Sauvegarder
+        with col_act1:
+            save_button = st.button(
+                "💾 Sauvegarder",
+                width='stretch',
+                type="primary",
+                key="save_formulation_btn"
+            )
+        
+        # Bouton Favoris
+        with col_act2:
+            fav_button = st.button(
+                "⭐ Favoris",
+                width='stretch',
+                key="fav_btn"
+            )
+        
+        # Bouton Export
+        with col_act3:
+            export_button = st.button(
+                "📥 Export CSV",
+                width='stretch',
+                key="export_btn"
+            )
+        
+        # ═══════════════════════════════════════════════════════════
+        # TRAITEMENT SAUVEGARDE
+        # ═══════════════════════════════════════════════════════════
+        
+        if save_button:
+            db_manager = st.session_state.get('db_manager')
+            
+            if not db_manager:
+                st.error("❌ Base de données non connectée - Impossible de sauvegarder")
+                st.info("💡 Vérifiez votre fichier .env et relancez l'application")
+                logger.error("DB Manager non disponible")
+                
+            elif not db_manager.is_connected:
+                st.error("❌ Base de données hors ligne - Impossible de sauvegarder")
+                st.info("💡 Vérifiez que PostgreSQL est démarré et accessible")
+                logger.error("DB Manager non connecté")
+                
+            else:
+                try:
+                    with st.spinner("💾 Sauvegarde en cours..."):
+                        logger.info(f"[SAVE] Tentative sauvegarde: {formulation_name}")
+                        
+                        success = db_manager.save_prediction(
+                            formulation=composition,
+                            predictions=predictions,
+                            formulation_name=formulation_name,
+                            user_id=st.session_state.get('user_id', 'anonyme')
+                        )
+                        
+                        if success:
+                            st.success("✅ Formulation sauvegardée avec succès !")
+                            st.balloons()
+                            logger.info(f"[SAVE] Succès: {formulation_name}")
+                            
+                            # ✅ INCRÉMENTER COMPTEUR SAUVEGARDES
+                            st.session_state['total_saves'] += 1
+                            
+                        else:
+                            st.error("❌ Échec de la sauvegarde")
+                            st.warning("⚠️ La prédiction n'a pas pu être enregistrée en base")
+                            logger.error(f"[SAVE] Échec: save_prediction = False")
+                            
+                            # Proposer export CSV en secours
+                            st.info("💡 **Alternative** : Utilisez le bouton 'Export CSV' pour sauvegarder localement")
+                
+                except psycopg2.OperationalError as e:
+                    st.error("❌ Erreur de connexion à la base de données")
+                    st.code(f"Détails: {str(e)}", language="text")
+                    logger.error(f"[SAVE] Erreur PostgreSQL: {e}", exc_info=True)
+                    
+                except Exception as e:
+                    st.error(f"❌ Erreur inattendue lors de la sauvegarde")
+                    st.code(f"Type: {type(e).__name__}\nMessage: {str(e)}", language="text")
+                    logger.error(f"[SAVE] Exception: {e}", exc_info=True)
+        
+        # ═══════════════════════════════════════════════════════════
+        # TRAITEMENT FAVORIS
+        # ═══════════════════════════════════════════════════════════
+        
+        if fav_button:
+            # Vérifier si déjà en favoris
+            already_fav = any(
+                fav['name'] == formulation_name 
+                for fav in st.session_state['favorites']
+            )
+            
+            if already_fav:
+                st.warning(f"⚠️ {formulation_name} est déjà dans vos favoris")
+            else:
+                st.session_state['favorites'].append({
+                    'name': formulation_name,
+                    'composition': composition,
+                    'predictions': predictions,
+                    'timestamp': datetime.now()
+                })
+                st.success(f"⭐ {formulation_name} ajouté aux favoris")
+                logger.info(f"[FAV] Ajout: {formulation_name}")
+        
+        # ═══════════════════════════════════════════════════════════
+        # TRAITEMENT EXPORT CSV
+        # ═══════════════════════════════════════════════════════════
+        
+        if export_button:
+            try:
+                import pandas as pd
+                
+                # Combiner composition + prédictions
+                export_data = {
+                    'Nom_Formulation': formulation_name,
+                    'Date_Export': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    **composition,
+                    **predictions
+                }
+                
+                df = pd.DataFrame([export_data])
+                csv = df.to_csv(index=False, encoding='utf-8-sig')
+                
+                st.download_button(
+                    label="⬇️ Télécharger le CSV",
+                    data=csv,
+                    file_name=f"{formulation_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    width='stretch',
+                    key="download_csv_btn"
+                )
+                
+                st.success("📁 Fichier CSV prêt au téléchargement")
+                logger.info(f"[EXPORT] CSV généré: {formulation_name}")
+                
+            except Exception as e:
+                st.error(f"❌ Erreur lors de l'export : {str(e)}")
+                logger.error(f"[EXPORT] Erreur: {e}", exc_info=True)
+    
+    # ═══════════════════════════════════════════════════════════════
+    # ÉTAT INITIAL (AVANT PRÉDICTION)
+    # ═══════════════════════════════════════════════════════════════
+    
+    elif not st.session_state.get('show_results'):
         
         info_box(
             title="Mode d'emploi",
@@ -459,12 +550,33 @@ with col_results:
                     "Carbonatation",
                     f"{last['predictions']['Carbonatation']:.1f} mm"
                 )
+            
+            # Bouton pour réafficher les résultats
+            if st.button("🔄 Réafficher les résultats complets", width='stretch'):
+                st.session_state['show_results'] = True
+                st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FOOTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 st.markdown("---")
+
+# Statistiques session
+col_stat1, col_stat2, col_stat3 = st.columns(3)
+
+with col_stat1:
+    total_preds = st.session_state.get('prediction_count', 0)
+    st.caption(f"🔬 **Prédictions** : {total_preds}")
+
+with col_stat2:
+    total_saves = st.session_state.get('total_saves', 0)
+    st.caption(f"💾 **Sauvegardes** : {total_saves}")
+
+with col_stat3:
+    total_favs = len(st.session_state.get('favorites', []))
+    st.caption(f"⭐ **Favoris** : {total_favs}")
+
 st.caption(
     "💡 **Conseil** : Pour comparer plusieurs formulations, utilisez le module **Comparateur**"
 )

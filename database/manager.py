@@ -1,8 +1,8 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
-DATABASE MANAGER - VERSION ULTRA-ROBUSTE
-Version: 2.0.0
-Correctifs: Hash unique, Retry automatique, Logs détaillés, Gestion erreurs
+DATABASE MANAGER - VERSION TRANSACTION EXPLICITE
+Version: 2.1.2 - FIX Transaction/Commit
+Correctif: Gestion explicite des transactions pour garantir le COMMIT
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
@@ -29,6 +29,12 @@ class DatabaseManager:
         self._min_conn = min_connections
         self._max_conn = max_connections
         self._is_connected = False
+        self._connection_error = None
+        
+        logger.info("=" * 80)
+        logger.info("[DB INIT] Demarrage DatabaseManager v2.1.2 (Transaction Fix)")
+        logger.info(f"[DB INIT] URL: {self._mask_password(db_url)}")
+        logger.info(f"[DB INIT] Pool: {min_connections}-{max_connections} connexions")
         
         try:
             self._pool = psycopg2.pool.ThreadedConnectionPool(
@@ -36,19 +42,99 @@ class DatabaseManager:
                 max_connections,
                 db_url
             )
-            logger.info(f"[DB] Pool cree: {min_connections}-{max_connections} connexions")
+            logger.info("[DB INIT] [OK] Pool cree avec succes")
             
             if self._test_connection():
                 self._is_connected = True
-                logger.info("[DB] Connexion etablie avec succes")
+                logger.info("[DB INIT] [OK] Connexion etablie et testee")
+                self._log_database_info()
             else:
-                logger.error("[DB] Test connexion echoue")
+                logger.error("[DB INIT] [ERREUR] Test connexion echoue")
+                self._connection_error = "Test connexion echoue"
+            
+        except psycopg2.OperationalError as e:
+            error_msg = str(e)
+            logger.error(f"[DB INIT] [ERREUR] Erreur operationnelle: {error_msg}")
+            
+            if "password" in error_msg.lower():
+                logger.error("[DB INIT] -> Authentification refusee (verifiez user/password)")
+            elif "database" in error_msg.lower():
+                logger.error("[DB INIT] -> Base de donnees introuvable (verifiez le nom)")
+            elif "connection refused" in error_msg.lower():
+                logger.error("[DB INIT] -> Serveur injoignable (verifiez host:port)")
+            else:
+                logger.error(f"[DB INIT] -> Erreur: {error_msg}")
+            
+            self._pool = None
+            self._is_connected = False
+            self._connection_error = error_msg
             
         except Exception as e:
-            logger.error(f"[DB] Erreur init pool: {e}")
+            logger.error(f"[DB INIT] [ERREUR] Erreur init pool: {e}")
             logger.debug(traceback.format_exc())
             self._pool = None
             self._is_connected = False
+            self._connection_error = str(e)
+        
+        logger.info("=" * 80)
+    
+    def _mask_password(self, url: str) -> str:
+        """Masque le password dans l'URL pour les logs."""
+        try:
+            if "://" in url and "@" in url:
+                parts = url.split("://")
+                scheme = parts[0]
+                rest = parts[1]
+                
+                if "@" in rest:
+                    auth, host = rest.split("@", 1)
+                    if ":" in auth:
+                        user, _ = auth.split(":", 1)
+                        return f"{scheme}://{user}:****@{host}"
+            return url
+        except:
+            return "***masque***"
+    
+    def _log_database_info(self):
+        """Log des infos sur la base de données."""
+        try:
+            conn = self._pool.getconn()
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT version();")
+            version = cursor.fetchone()[0]
+            logger.info(f"[DB INFO] PostgreSQL: {version[:50]}...")
+            
+            cursor.execute("SELECT current_database();")
+            db_name = cursor.fetchone()[0]
+            logger.info(f"[DB INFO] Database: {db_name}")
+            
+            cursor.execute("SELECT current_user;")
+            user = cursor.fetchone()[0]
+            logger.info(f"[DB INFO] User: {user}")
+            
+            # Vérifier table predictions
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'predictions'
+                );
+            """)
+            table_exists = cursor.fetchone()[0]
+            
+            if table_exists:
+                cursor.execute("SELECT COUNT(*) FROM predictions;")
+                count = cursor.fetchone()[0]
+                logger.info(f"[DB INFO] Table 'predictions': OK ({count} enregistrements)")
+            else:
+                logger.warning("[DB INFO] Table 'predictions': INTROUVABLE")
+            
+            cursor.close()
+            self._pool.putconn(conn)
+            
+        except Exception as e:
+            logger.warning(f"[DB INFO] Impossible de recuperer les infos: {e}")
     
     def _test_connection(self) -> bool:
         """Test connexion avec retry."""
@@ -66,11 +152,11 @@ class DatabaseManager:
                 self._pool.putconn(conn)
                 
                 if result and result[0] == 1:
-                    logger.debug(f"[DB] Test connexion OK (tentative {attempt+1})")
+                    logger.debug(f"[DB TEST] [OK] Connexion OK (tentative {attempt+1})")
                     return True
                     
             except Exception as e:
-                logger.warning(f"[DB] Test connexion echoue (tentative {attempt+1}/{max_retries}): {e}")
+                logger.warning(f"[DB TEST] [WARN] Tentative {attempt+1}/{max_retries}: {e}")
                 if attempt < max_retries - 1:
                     time.sleep(0.5)
                     
@@ -80,6 +166,11 @@ class DatabaseManager:
     def is_connected(self) -> bool:
         """Vérifie état connexion actuelle."""
         return self._is_connected and self._pool is not None
+    
+    @property
+    def connection_error(self) -> Optional[str]:
+        """Retourne l'erreur de connexion si présente."""
+        return self._connection_error
     
     def execute_query(
         self,
@@ -101,7 +192,7 @@ class DatabaseManager:
             Liste de dicts (si fetch=True) ou liste vide (si fetch=False)
         """
         if not self._pool:
-            logger.error("[QUERY] Pool non disponible")
+            logger.error("[QUERY] [ERREUR] Pool non disponible")
             return None
         
         last_error = None
@@ -118,20 +209,20 @@ class DatabaseManager:
                 
                 if fetch:
                     results = cursor.fetchall()
-                    logger.debug(f"[QUERY] {len(results)} ligne(s) recuperee(s)")
+                    logger.debug(f"[QUERY] [OK] {len(results)} ligne(s) recuperee(s)")
                     cursor.close()
                     self._pool.putconn(conn)
                     return [dict(row) for row in results]
                 else:
                     conn.commit()
-                    logger.debug("[QUERY] COMMIT effectue")
+                    logger.debug("[QUERY] [OK] COMMIT effectue")
                     cursor.close()
                     self._pool.putconn(conn)
                     return []
                     
             except psycopg2.OperationalError as e:
                 last_error = e
-                logger.warning(f"[QUERY] Erreur operationnelle (tentative {attempt+1}): {e}")
+                logger.warning(f"[QUERY] [WARN] Erreur operationnelle (tentative {attempt+1}): {e}")
                 
                 if conn:
                     try:
@@ -147,7 +238,7 @@ class DatabaseManager:
                     time.sleep(0.2 * (attempt + 1))
                     
             except Exception as e:
-                logger.error(f"[QUERY] Erreur SQL: {e}")
+                logger.error(f"[QUERY] [ERREUR] Erreur SQL: {e}")
                 logger.debug(traceback.format_exc())
                 
                 if conn:
@@ -161,7 +252,7 @@ class DatabaseManager:
                         pass
                 return None
         
-        logger.error(f"[QUERY] Echec apres {max_retries} tentatives: {last_error}")
+        logger.error(f"[QUERY] [ERREUR] Echec apres {max_retries} tentatives: {last_error}")
         return None
     
     def save_prediction(
@@ -172,33 +263,32 @@ class DatabaseManager:
         user_id: Optional[str] = None
     ) -> bool:
         """
-        Sauvegarde prédiction (VERSION ULTRA-ROBUSTE).
-        
-        Améliorations v2.0:
-        - Hash garanti unique (UUID + microseconds + random)
-        - Validation données avant INSERT
-        - Retry automatique
-        - Logs ultra-détaillés
-        - Gestion complète erreurs
+        Sauvegarde prédiction avec transaction EXPLICITE.
         
         Returns:
             True si sauvegarde réussie, False sinon
         """
-        logger.info(f"[SAVE] === DEBUT SAUVEGARDE: {formulation_name} ===")
+        logger.info("=" * 80)
+        logger.info(f"[SAVE] DEBUT SAUVEGARDE: '{formulation_name}'")
+        logger.info(f"[SAVE] User: {user_id or 'anonyme'}")
         
         # Validation connexion
         if not self._pool or not self._is_connected:
-            logger.error("[SAVE] Base de donnees non connectee")
+            logger.error("[SAVE] [ERREUR] Base de donnees non connectee")
+            if self._connection_error:
+                logger.error(f"[SAVE] Erreur: {self._connection_error}")
             return False
+        
+        conn = None
+        cursor = None
         
         try:
             # ═══════════════════════════════════════════════════════════
             # 1. EXTRACTION & VALIDATION DONNÉES
             # ═══════════════════════════════════════════════════════════
             
-            logger.debug("[SAVE] Extraction donnees...")
+            logger.debug("[SAVE] 1/6 Extraction donnees...")
             
-            # Composition (avec validation)
             ciment = float(formulation.get('Ciment', 0.0))
             eau = float(formulation.get('Eau', 0.0))
             sable = float(formulation.get('SableFin', 0.0))
@@ -208,40 +298,35 @@ class DatabaseManager:
             adjuvants = float(formulation.get('Superplastifiant', 0.0))
             age = int(formulation.get('Age', 28))
             
-            # Validation basique
             if ciment <= 0 or eau <= 0:
-                logger.error(f"[SAVE] Donnees invalides: ciment={ciment}, eau={eau}")
+                logger.error(f"[SAVE] [ERREUR] Donnees invalides: ciment={ciment}, eau={eau}")
                 return False
             
             logger.debug(f"[SAVE] Composition: C={ciment}, E={eau}, S={sable}, G={gravier}")
             
-            # Prédictions
             resistance = float(predictions.get('Resistance', 0.0))
             diffusion = float(predictions.get('Diffusion_Cl', 0.0))
             carbonatation = float(predictions.get('Carbonatation', 0.0))
             ratio = float(predictions.get('Ratio_E_L', 0.5))
             
             if resistance <= 0:
-                logger.error(f"[SAVE] Resistance invalide: {resistance}")
+                logger.error(f"[SAVE] [ERREUR] Resistance invalide: {resistance}")
                 return False
             
-            logger.debug(f"[SAVE] Predictions: R={resistance}, D={diffusion}, C={carbonatation}")
+            logger.debug(f"[SAVE] Predictions: R={resistance:.2f}, D={diffusion:.2f}, C={carbonatation:.2f}")
             
             # ═══════════════════════════════════════════════════════════
-            # 2. GÉNÉRATION HASH ULTRA-UNIQUE
+            # 2. GÉNÉRATION HASH
             # ═══════════════════════════════════════════════════════════
             
-            # Timestamp microsecondes
+            logger.debug("[SAVE] 2/6 Generation hash unique...")
+            
             timestamp_micro = datetime.now().strftime('%Y%m%d%H%M%S%f')
-            
-            # UUID court
             unique_id = str(uuid.uuid4())[:12]
             
-            # Random additionnel pour éviter collisions
             import random
             random_salt = f"{random.randint(1000, 9999)}"
             
-            # Hash content
             hash_content = (
                 f"{formulation_name}"
                 f"{resistance}"
@@ -252,11 +337,22 @@ class DatabaseManager:
             
             hash_val = hashlib.md5(hash_content.encode()).hexdigest()
             
-            logger.info(f"[SAVE] Hash genere: {hash_val[:16]}...")
+            logger.debug(f"[SAVE] Hash genere: {hash_val}")
             
             # ═══════════════════════════════════════════════════════════
-            # 3. PRÉPARATION REQUÊTE SQL
+            # 3. OBTENIR CONNEXION
             # ═══════════════════════════════════════════════════════════
+            
+            logger.debug("[SAVE] 3/6 Obtention connexion...")
+            
+            conn = self._pool.getconn()
+            logger.debug("[SAVE] Connexion obtenue du pool")
+            
+            # ═══════════════════════════════════════════════════════════
+            # 4. PRÉPARATION REQUÊTE
+            # ═══════════════════════════════════════════════════════════
+            
+            logger.debug("[SAVE] 4/6 Preparation requete SQL...")
             
             query = """
                 INSERT INTO predictions (
@@ -286,7 +382,7 @@ class DatabaseManager:
             """
             
             params = (
-                formulation_name[:255],  # Limite 255 caractères
+                formulation_name[:255],
                 resistance,
                 hash_val,
                 user_id or 'anonyme',
@@ -296,10 +392,10 @@ class DatabaseManager:
                 sable,
                 gravier,
                 adjuvants,
-                None,  # temperature_celsius
+                None,
                 age,
                 'v1.0.0',
-                None,  # score_confiance
+                None,
                 diffusion,
                 carbonatation,
                 laitier,
@@ -309,37 +405,58 @@ class DatabaseManager:
             logger.debug(f"[SAVE] Parametres prepares: {len(params)} valeurs")
             
             # ═══════════════════════════════════════════════════════════
-            # 4. EXÉCUTION INSERT AVEC RETRY
+            # 5. EXÉCUTION INSERT avec CURSOR EXPLICITE
             # ═══════════════════════════════════════════════════════════
             
-            logger.info("[SAVE] Execution INSERT...")
+            logger.info("[SAVE] 5/6 Execution INSERT...")
             
-            result = self.execute_query(query, params, fetch=True, max_retries=3)
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(query, params)
+            
+            result = cursor.fetchone()
+            
+            if not result:
+                logger.error("[SAVE] [ERREUR] INSERT n'a retourne aucun resultat")
+                conn.rollback()
+                return False
+            
+            new_id = result['id']
+            timestamp = result['horodatage']
+            
+            logger.info(f"[SAVE] INSERT retourne: ID={new_id}, Timestamp={timestamp}")
             
             # ═══════════════════════════════════════════════════════════
-            # 5. VÉRIFICATION RÉSULTAT
+            # 6. COMMIT EXPLICITE et VÉRIFICATION
             # ═══════════════════════════════════════════════════════════
             
-            if result and len(result) > 0:
-                new_id = result[0].get('id')
-                timestamp = result[0].get('horodatage')
+            logger.info("[SAVE] 6/6 COMMIT transaction...")
+            
+            conn.commit()
+            
+            logger.info("[SAVE] COMMIT effectue - Transaction validee")
+            
+            # Vérification immédiate APRÈS commit
+            cursor.execute("SELECT id, nom_formulation FROM predictions WHERE id = %s", (new_id,))
+            verify_result = cursor.fetchone()
+            
+            if verify_result:
+                logger.info(f"[SAVE] *** SUCCES CONFIRME ***")
+                logger.info(f"[SAVE] ID cree: {new_id}")
+                logger.info(f"[SAVE] Nom verifie: {verify_result['nom_formulation']}")
+                logger.info(f"[SAVE] Hash: {hash_val[:16]}...")
+                logger.info("=" * 80)
                 
-                logger.info(f"[SAVE] === SUCCES ! ID={new_id}, Timestamp={timestamp} ===")
+                cursor.close()
+                self._pool.putconn(conn)
                 
-                # Vérification supplémentaire (optionnelle mais recommandée)
-                verify_query = "SELECT id FROM predictions WHERE id = %s"
-                verify_result = self.execute_query(verify_query, (new_id,), fetch=True)
-                
-                if verify_result and len(verify_result) > 0:
-                    logger.info("[SAVE] Verification: Donnee bien presente en base")
-                    return True
-                else:
-                    logger.warning("[SAVE] Verification: Donnee introuvable (commit tardif?)")
-                    return True  # On retourne quand même True car INSERT a réussi
-                    
+                return True
             else:
-                logger.error("[SAVE] INSERT n'a retourne aucun ID")
-                logger.error(f"[SAVE] Resultat: {result}")
+                logger.error(f"[SAVE] [ERREUR CRITIQUE] ID {new_id} non trouve apres COMMIT")
+                logger.error("=" * 80)
+                
+                cursor.close()
+                self._pool.putconn(conn)
+                
                 return False
         
         # ═══════════════════════════════════════════════════════════════
@@ -347,37 +464,51 @@ class DatabaseManager:
         # ═══════════════════════════════════════════════════════════════
         
         except psycopg2.IntegrityError as e:
-            logger.error(f"[SAVE] Erreur IntegrityError: {e}")
+            logger.error("=" * 80)
+            logger.error("[SAVE] *** IntegrityError ***")
+            logger.error(f"[SAVE] Message: {e}")
+            logger.error(f"[SAVE] PG Code: {e.pgcode}")
+            
+            if conn:
+                try:
+                    conn.rollback()
+                    logger.info("[SAVE] ROLLBACK effectue")
+                except:
+                    pass
             
             if 'hash_formulation' in str(e):
-                logger.error("[SAVE] Hash duplique detecte (tres improbable avec UUID)")
-                logger.error(f"[SAVE] Hash utilise: {hash_val}")
-            elif 'unique' in str(e).lower():
-                logger.error("[SAVE] Violation contrainte UNIQUE")
-            elif 'foreign key' in str(e).lower():
-                logger.error("[SAVE] Violation contrainte FOREIGN KEY")
-            else:
-                logger.error(f"[SAVE] Autre erreur integrite: {e.pgerror}")
+                logger.error("[SAVE] -> Hash duplique")
+                logger.error(f"[SAVE] -> Hash utilise: {hash_val}")
             
-            return False
-        
-        except psycopg2.OperationalError as e:
-            logger.error(f"[SAVE] Erreur operationnelle PostgreSQL: {e}")
-            logger.error("[SAVE] La base de donnees est peut-etre indisponible")
-            return False
-        
-        except psycopg2.Error as e:
-            logger.error(f"[SAVE] Erreur PostgreSQL: {e.pgcode} - {e.pgerror}")
-            logger.debug(traceback.format_exc())
-            return False
-        
-        except ValueError as e:
-            logger.error(f"[SAVE] Erreur conversion donnees: {e}")
+            logger.error("=" * 80)
+            
+            if cursor:
+                cursor.close()
+            if conn:
+                self._pool.putconn(conn)
+            
             return False
         
         except Exception as e:
-            logger.error(f"[SAVE] Erreur inattendue: {type(e).__name__} - {e}")
+            logger.error("=" * 80)
+            logger.error("[SAVE] *** Exception ***")
+            logger.error(f"[SAVE] Type: {type(e).__name__}")
+            logger.error(f"[SAVE] Message: {e}")
             logger.debug(traceback.format_exc())
+            logger.error("=" * 80)
+            
+            if conn:
+                try:
+                    conn.rollback()
+                    logger.info("[SAVE] ROLLBACK effectue")
+                except:
+                    pass
+            
+            if cursor:
+                cursor.close()
+            if conn:
+                self._pool.putconn(conn)
+            
             return False
     
     def get_recent_predictions(self, limit: int = 5) -> List[Dict]:
@@ -436,7 +567,7 @@ class DatabaseManager:
                 'created_at': row.get('created_at', datetime.now())
             })
         
-        logger.debug(f"[GET] {len(formatted_results)} predictions formatees")
+        logger.debug(f"[GET] [OK] {len(formatted_results)} predictions formatees")
         return formatted_results
     
     def get_live_stats(self) -> Dict:
@@ -492,12 +623,12 @@ class DatabaseManager:
                     'db_connected': True
                 })
                 
-                logger.debug(f"[STATS] Total predictions: {stats['total_predictions']}")
+                logger.debug(f"[STATS] [OK] Total predictions: {stats['total_predictions']}")
             
             return stats
             
         except Exception as e:
-            logger.error(f"[STATS] Erreur: {e}")
+            logger.error(f"[STATS] [ERREUR] Erreur: {e}")
             return {**stats, 'db_connected': False, 'error': str(e)}
     
     def _get_fallback_predictions(self, limit: int) -> List[Dict]:
@@ -540,6 +671,43 @@ class DatabaseManager:
         ]
         
         return demo_data[:limit]
+    
+    def get_diagnostics(self) -> Dict[str, Any]:
+        """Retourne un rapport de diagnostic complet."""
+        diag = {
+            'connected': self.is_connected,
+            'pool_available': self._pool is not None,
+            'connection_error': self._connection_error,
+            'pool_config': {
+                'min': self._min_conn,
+                'max': self._max_conn
+            }
+        }
+        
+        if self.is_connected:
+            try:
+                conn = self._pool.getconn()
+                cursor = conn.cursor()
+                
+                cursor.execute("SELECT version();")
+                diag['postgresql_version'] = cursor.fetchone()[0][:100]
+                
+                cursor.execute("SELECT current_database();")
+                diag['database'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT current_user;")
+                diag['user'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM predictions;")
+                diag['predictions_count'] = cursor.fetchone()[0]
+                
+                cursor.close()
+                self._pool.putconn(conn)
+                
+            except Exception as e:
+                diag['diagnostics_error'] = str(e)
+        
+        return diag
     
     def close(self):
         """Ferme pool connexions proprement."""

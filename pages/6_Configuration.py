@@ -1,28 +1,38 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
 PAGE: Configuration - Diagnostics et Paramètres
-Fichier: app/pages/6_Configuration.py
+Fichier: pages/6_Configuration.py
 Auteur: Stage R&D - IMT Nord Europe
-Version: 1.0.0
+Version: 1.1.0 - CORRECTIFS
 ═══════════════════════════════════════════════════════════════════════════════
+
+CORRECTIFS v1.1.0:
+✅ Initialisation session_state
+✅ Gestion erreurs robuste
+✅ width='stretch' (pas deprecated)
+✅ Imports sécurisés
+✅ Diagnostics DB améliorés
 """
 
 import streamlit as st
 import logging
 from pathlib import Path
 import sys
-import psutil
 import pandas as pd
 
 from config.settings import (
     APP_SETTINGS,
     MODEL_SETTINGS,
-    DATABASE_SETTINGS,
     POSTGRES_SETTINGS
 )
 from config.constants import COLOR_PALETTE
 from app.styles.theme import apply_custom_theme
 from app.components.sidebar import render_sidebar
+
+from app.core.session_manager import initialize_session
+
+# ✅ INITIALISER SESSION
+initialize_session()
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +55,12 @@ render_sidebar(db_manager=st.session_state.get('db_manager'))
 
 st.markdown(
     f"""
-    <h1 style="color: {COLOR_PALETTE['primary']};">
+    <h1 style="color: {COLOR_PALETTE['primary']}; border-bottom: 3px solid {COLOR_PALETTE['accent']}; padding-bottom: 0.5rem;">
         ⚙️ Configuration & Diagnostics
     </h1>
+    <p style="font-size: 1.1rem; color: {COLOR_PALETTE['secondary']}; margin-top: 0.5rem;">
+        Paramètres système, diagnostics et tests de santé.
+    </p>
     """,
     unsafe_allow_html=True
 )
@@ -77,18 +90,18 @@ with tab_app:
     with col1:
         st.markdown("#### Informations Générales")
         
-        st.markdown(f"**Nom** : {APP_SETTINGS['app_name']}")
-        st.markdown(f"**Version** : {APP_SETTINGS['version']}")
-        st.markdown(f"**Date Release** : {APP_SETTINGS['release_date']}")
-        st.markdown(f"**Institution** : {APP_SETTINGS['institution']}")
-        st.markdown(f"**Campus** : {APP_SETTINGS['campus']}")
+        st.markdown(f"**Nom** : {APP_SETTINGS.get('app_name', 'N/A')}")
+        st.markdown(f"**Version** : {APP_SETTINGS.get('version', 'N/A')}")
+        st.markdown(f"**Date Release** : {APP_SETTINGS.get('release_date', 'N/A')}")
+        st.markdown(f"**Institution** : {APP_SETTINGS.get('institution', 'N/A')}")
+        st.markdown(f"**Campus** : {APP_SETTINGS.get('campus', 'N/A')}")
     
     with col2:
         st.markdown("#### Contact")
         
-        st.markdown(f"**Email** : {APP_SETTINGS['email']}")
-        st.markdown(f"**Téléphone** : {APP_SETTINGS['phone']}")
-        st.markdown(f"**Website** : {APP_SETTINGS['website']}")
+        st.markdown(f"**Email** : {APP_SETTINGS.get('email', 'N/A')}")
+        st.markdown(f"**Téléphone** : {APP_SETTINGS.get('phone', 'N/A')}")
+        st.markdown(f"**Website** : {APP_SETTINGS.get('website', 'N/A')}")
     
     st.markdown("---")
     
@@ -124,6 +137,24 @@ with tab_app:
     
     for limit_name, limit_value in limits.items():
         st.markdown(f"• **{limit_name}** : {limit_value}")
+    
+    st.markdown("---")
+    
+    st.markdown("#### 📈 Statistiques Session")
+    
+    col_stat1, col_stat2, col_stat3 = st.columns(3)
+    
+    with col_stat1:
+        pred_count = st.session_state.get('prediction_count', 0)
+        st.metric("🔬 Prédictions", pred_count)
+    
+    with col_stat2:
+        save_count = st.session_state.get('total_saves', 0)
+        st.metric("💾 Sauvegardes", save_count)
+    
+    with col_stat3:
+        fav_count = len(st.session_state.get('favorites', []))
+        st.metric("⭐ Favoris", fav_count)
 
 # ───────────────────────────────────────────────────────────────────────────────
 # TAB 2 : MODÈLE ML
@@ -145,19 +176,28 @@ with tab_model:
         with col_m1:
             st.markdown("#### 📁 Chemins")
             
-            st.markdown(f"**Modèle** : `{MODEL_SETTINGS['model_path']}`")
-            st.markdown(f"**Features** : `{MODEL_SETTINGS['features_path']}`")
-            st.markdown(f"**Métadonnées** : `{MODEL_SETTINGS['metadata_path']}`")
+            model_path = MODEL_SETTINGS.get('model_path', 'N/A')
+            features_path = MODEL_SETTINGS.get('features_path', 'N/A')
+            metadata_path = MODEL_SETTINGS.get('metadata_path', 'N/A')
+            
+            st.markdown(f"**Modèle** : `{model_path}`")
+            st.markdown(f"**Features** : `{features_path}`")
+            st.markdown(f"**Métadonnées** : `{metadata_path}`")
             
             # Vérifier existence fichiers
-            model_exists = Path(MODEL_SETTINGS['model_path']).exists()
-            st.markdown(f"Fichier modèle : {'✅ Existant' if model_exists else '❌ Manquant'}")
+            if model_path != 'N/A':
+                model_exists = Path(model_path).exists()
+                st.markdown(f"Fichier modèle : {'✅ Existant' if model_exists else '❌ Manquant'}")
         
         with col_m2:
             st.markdown("#### 🎯 Cibles Prédiction")
             
-            for target in MODEL_SETTINGS['targets']:
-                st.markdown(f"• **{target}** ({MODEL_SETTINGS['units'].get(target, 'N/A')})")
+            targets = MODEL_SETTINGS.get('targets', [])
+            units = MODEL_SETTINGS.get('units', {})
+            
+            for target in targets:
+                unit = units.get(target, 'N/A')
+                st.markdown(f"• **{target}** ({unit})")
         
         st.markdown("---")
         
@@ -212,7 +252,8 @@ with tab_model:
                     result = predict_concrete_properties(
                         composition=test_comp,
                         model=model,
-                        feature_list=features
+                        feature_list=features,
+                        validate=False
                     )
                     
                     st.success("✅ Test réussi !")
@@ -232,10 +273,22 @@ with tab_model:
                         st.caption("Attendu : ~16.7 mm")
                 
                 except Exception as e:
-                    st.error(f"❌ Erreur test : {e}")
+                    st.error(f"❌ Erreur test : {str(e)}")
+                    logger.error(f"Test modèle échoué: {e}", exc_info=True)
     
     else:
-        st.error("❌ Modèle non chargé. Vérifiez les logs au démarrage.")
+        st.error("❌ Modèle non chargé")
+        st.info("💡 Vérifiez les logs au démarrage de l'application")
+        
+        # Diagnostics
+        st.markdown("#### 🔍 Diagnostics")
+        
+        if not model:
+            st.warning("⚠️ Objet modèle absent dans session_state")
+        if not features:
+            st.warning("⚠️ Liste features absente dans session_state")
+        if not metadata:
+            st.warning("⚠️ Métadonnées absentes dans session_state")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # TAB 3 : BASE DE DONNÉES
@@ -246,7 +299,7 @@ with tab_db:
     
     db_manager = st.session_state.get('db_manager')
     
-    if db_manager:
+    if db_manager and db_manager.is_connected:
         st.success("✅ Connexion active")
         
         col_db1, col_db2 = st.columns(2)
@@ -255,12 +308,21 @@ with tab_db:
             st.markdown("#### Configuration")
             
             # Masquer mot de passe
-            db_url = POSTGRES_SETTINGS['database_url']
-            db_url_masked = db_url.split('@')[1] if '@' in db_url else db_url
+            db_url = POSTGRES_SETTINGS.get('database_url', 'N/A')
             
-            st.markdown(f"**Host** : `{db_url_masked}`")
-            st.markdown(f"**Pool size** : {POSTGRES_SETTINGS['pool_size']}")
-            st.markdown(f"**Max overflow** : {POSTGRES_SETTINGS['max_overflow']}")
+            if '@' in db_url:
+                # Extraire host après @
+                db_url_masked = db_url.split('@')[1] if '@' in db_url else db_url
+                # Extraire user avant :
+                user_part = db_url.split('://')[1].split(':')[0] if '://' in db_url else 'N/A'
+                
+                st.markdown(f"**User** : `{user_part}`")
+                st.markdown(f"**Host** : `{db_url_masked}`")
+            else:
+                st.markdown(f"**URL** : `{db_url}`")
+            
+            st.markdown(f"**Pool size** : {POSTGRES_SETTINGS.get('pool_size', 5)}")
+            st.markdown(f"**Max overflow** : {POSTGRES_SETTINGS.get('max_overflow', 10)}")
         
         with col_db2:
             st.markdown("#### Statistiques")
@@ -270,10 +332,39 @@ with tab_db:
                 
                 st.metric("Prédictions totales", f"{stats.get('total_predictions', 0):,}")
                 st.metric("Formulations uniques", f"{stats.get('formulations_analyzed', 0):,}")
-                st.metric("Utilisateurs actifs (24h)", f"{stats.get('active_users', 0)}")
+                st.metric("Résistance moyenne", f"{stats.get('avg_resistance', 0):.1f} MPa")
             
             except Exception as e:
-                st.warning(f"⚠️ Impossible de récupérer les stats : {e}")
+                st.warning(f"⚠️ Impossible de récupérer les stats : {str(e)}")
+                logger.error(f"Erreur stats DB: {e}", exc_info=True)
+        
+        st.markdown("---")
+        
+        st.markdown("#### 🔍 Diagnostics Avancés")
+        
+        try:
+            diag = db_manager.get_diagnostics()
+            
+            col_diag1, col_diag2 = st.columns(2)
+            
+            with col_diag1:
+                st.markdown("**PostgreSQL Version**")
+                st.code(diag.get('postgresql_version', 'N/A')[:80], language="text")
+                
+                st.markdown("**Database**")
+                st.code(diag.get('database', 'N/A'), language="text")
+            
+            with col_diag2:
+                st.markdown("**User**")
+                st.code(diag.get('user', 'N/A'), language="text")
+                
+                st.markdown("**Prédictions**")
+                st.code(f"{diag.get('predictions_count', 0)} enregistrements", language="text")
+        
+        except AttributeError:
+            st.info("ℹ️ Méthode get_diagnostics() non disponible (ancienne version DB Manager)")
+        except Exception as e:
+            st.warning(f"⚠️ Erreur diagnostics: {str(e)}")
         
         st.markdown("---")
         
@@ -283,18 +374,37 @@ with tab_db:
             with st.spinner("Test..."):
                 try:
                     result = db_manager.execute_query("SELECT 1 as test", fetch=True)
-                    if result and result[0]['test'] == 1:
+                    if result and len(result) > 0 and result[0].get('test') == 1:
                         st.success("✅ Connexion fonctionnelle")
                     else:
                         st.error("❌ Réponse inattendue")
                 except Exception as e:
-                    st.error(f"❌ Erreur : {e}")
+                    st.error(f"❌ Erreur : {str(e)}")
+                    logger.error(f"Test connexion DB: {e}", exc_info=True)
     
     else:
-        st.warning("⚠️ Base de données non connectée")
+        if db_manager and not db_manager.is_connected:
+            st.error("❌ Base de données déconnectée")
+            
+            error = db_manager.connection_error
+            if error:
+                st.error(f"**Erreur** : {error}")
+        else:
+            st.warning("⚠️ Base de données non initialisée")
         
         st.markdown("#### Configuration attendue")
-        st.code(f"DATABASE_URL={POSTGRES_SETTINGS['database_url']}", language="bash")
+        
+        db_url = POSTGRES_SETTINGS.get('database_url', 'N/A')
+        if '@' in db_url:
+            # Masquer password
+            parts = db_url.split('@')
+            user = parts[0].split('://')[-1].split(':')[0]
+            host = parts[1]
+            db_url_display = f"postgresql://{user}:****@{host}"
+        else:
+            db_url_display = db_url
+        
+        st.code(f"DATABASE_URL={db_url_display}", language="bash")
         
         st.markdown(
             """
@@ -304,6 +414,11 @@ with tab_db:
             2. Créer la base `concrete_ai_platform`
             3. Configurer `.env` avec l'URL de connexion
             4. Redémarrer l'application
+            
+            **Fichier .env** :
+            ```
+            DATABASE_URL=postgresql://user:password@localhost:5432/concrete_ai_platform
+            ```
             """
         )
 
@@ -332,42 +447,110 @@ with tab_system:
     
     st.markdown("#### 📊 Ressources")
     
-    col_r1, col_r2, col_r3 = st.columns(3)
+    try:
+        import psutil
+        
+        col_r1, col_r2, col_r3 = st.columns(3)
+        
+        with col_r1:
+            cpu_percent = psutil.cpu_percent(interval=1)
+            st.metric("CPU", f"{cpu_percent}%")
+        
+        with col_r2:
+            mem = psutil.virtual_memory()
+            mem_percent = mem.percent
+            mem_used_gb = mem.used / (1024**3)
+            mem_total_gb = mem.total / (1024**3)
+            st.metric(
+                "RAM", 
+                f"{mem_percent}%",
+                delta=f"{mem_used_gb:.1f} / {mem_total_gb:.1f} GB"
+            )
+        
+        with col_r3:
+            disk = psutil.disk_usage('/')
+            disk_percent = disk.percent
+            disk_used_gb = disk.used / (1024**3)
+            disk_total_gb = disk.total / (1024**3)
+            st.metric(
+                "Disque", 
+                f"{disk_percent}%",
+                delta=f"{disk_used_gb:.0f} / {disk_total_gb:.0f} GB"
+            )
     
-    with col_r1:
-        cpu_percent = psutil.cpu_percent(interval=1)
-        st.metric("CPU", f"{cpu_percent}%")
+    except ImportError:
+        st.warning("⚠️ Module psutil non installé. Impossible d'afficher les ressources.")
+        st.info("💡 Installez avec : `pip install psutil`")
     
-    with col_r2:
-        mem = psutil.virtual_memory()
-        mem_percent = mem.percent
-        st.metric("RAM", f"{mem_percent}%")
-    
-    with col_r3:
-        disk = psutil.disk_usage('/')
-        disk_percent = disk.percent
-        st.metric("Disque", f"{disk_percent}%")
+    except Exception as e:
+        st.error(f"❌ Erreur récupération ressources : {str(e)}")
     
     st.markdown("---")
     
     st.markdown("#### 📦 Packages Installés")
     
     if st.button("📋 Afficher Packages"):
-        import importlib.metadata
-        pkg_resources = importlib.metadata
+        try:
+            import pkg_resources # type: ignore
+            
+            installed = []
+            for dist in pkg_resources.working_set:
+                try:
+                    installed.append(f"{dist.key}=={dist.version}")
+                except:
+                    installed.append(f"{dist.key}==unknown")
+            
+            installed_sorted = sorted(installed)
+            
+            st.text_area(
+                "Packages",
+                value="\n".join(installed_sorted),
+                height=300
+            )
+            
+            st.info(f"📊 Total : {len(installed_sorted)} packages")
         
-        installed = [f"{pkg.key}=={pkg.version}" for pkg in pkg_resources.working_set]
-        installed_sorted = sorted(installed)
-        
-        st.text_area(
-            "Packages",
-            value="\n".join(installed_sorted),
-            height=300
-        )
+        except Exception as e:
+            st.error(f"❌ Erreur : {str(e)}")
+            st.info("💡 Essayez : `pip list` dans votre terminal")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ACTIONS RAPIDES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+st.markdown("---")
+
+st.markdown("### ⚡ Actions Rapides")
+
+col_act1, col_act2, col_act3 = st.columns(3)
+
+with col_act1:
+    if st.button("🔄 Recharger Session", width='stretch'):
+        # Réinitialiser compteurs
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.success("✅ Session réinitialisée")
+        st.rerun()
+
+with col_act2:
+    if st.button("🧹 Vider Favoris", width='stretch'):
+        st.session_state['favorites'] = []
+        st.success("✅ Favoris vidés")
+
+with col_act3:
+    if st.button("📊 Afficher Session State", width='stretch'):
+        st.json(dict(st.session_state))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FOOTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 st.markdown("---")
-st.caption("💡 Pour toute assistance technique, contactez support@imt-nord-europe.fr")
+
+col_footer1, col_footer2 = st.columns(2)
+
+with col_footer1:
+    st.caption("💡 **Conseil** : Surveillez régulièrement l'état de la connexion DB")
+
+with col_footer2:
+    st.caption(f"🔧 **Support** : {APP_SETTINGS.get('email', 'N/A')}")
