@@ -339,6 +339,19 @@ def plot_cost_breakdown(
     
     return fig
 
+import warnings
+from typing import Tuple
+import numpy as np
+
+# Import du moteur expert
+try:
+    from app.lab.surface_engine import SurfaceEngine
+    _SURFACE_ENGINE_AVAILABLE = True
+except ImportError:
+    _SURFACE_ENGINE_AVAILABLE = False
+    import logging
+    logging.warning("SurfaceEngine non disponible - utilisation méthode legacy")
+
 def generate_response_surface_data(
     baseline: dict[str, float],
     param1: str,
@@ -346,10 +359,16 @@ def generate_response_surface_data(
     model,
     feature_list: list[str],
     target: str = 'Resistance',
-    n_points: int = 20
+    n_points: int = 20,
+    cement_type: str = 'CEM I' 
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Génère les données pour une surface de réponse 3D.
+    
+    ⚠️ DEPRECATED: Utiliser SurfaceEngine pour fonctionnalités avancées.
+    
+    Cette fonction est maintenue pour rétrocompatibilité mais délègue
+    au nouveau moteur SurfaceEngine si disponible.
     
     Args:
         baseline: Formulation de base
@@ -358,50 +377,75 @@ def generate_response_surface_data(
         feature_list: Liste des features
         target: Cible à prédire (Z)
         n_points: Résolution grille
+        cement_type: Type ciment (pour CO₂)
     
     Returns:
         (X, Y, Z) meshgrids
     """
-    from config.constants import BOUNDS
-    from app.core.predictor import predict_concrete_properties
     
-    # Plages
-    x_range = np.linspace(
-        BOUNDS[param1]['min'],
-        BOUNDS[param1]['max'],
-        n_points
-    )
+    # UTILISE LE NOUVEAU MOTEUR SI DISPONIBLE
+    if _SURFACE_ENGINE_AVAILABLE:
+        warnings.warn(
+            "generate_response_surface_data() est deprecated. "
+            "Utilisez SurfaceEngine pour cache + CO₂ + multi-objectifs.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        
+        engine = SurfaceEngine()
+        
+        surface_data = engine.generate_surface(
+            baseline=baseline,
+            param1=param1,
+            param2=param2,
+            model=model,
+            feature_list=feature_list,
+            cement_type=cement_type,
+            target=target,
+            resolution=n_points,
+            use_cache=True
+        )
+        
+        return surface_data.X, surface_data.Y, surface_data.Z
     
-    y_range = np.linspace(
-        BOUNDS[param2]['min'],
-        BOUNDS[param2]['max'],
-        n_points
-    )
-    
-    X, Y = np.meshgrid(x_range, y_range)
-    Z = np.zeros_like(X)
-    
-    # Calcul prédictions
-    for i in range(n_points):
-        for j in range(n_points):
-            composition = baseline.copy()
-            composition[param1] = float(X[i, j])
-            composition[param2] = float(Y[i, j])
-            
-            try:
-                preds = predict_concrete_properties(
-                    composition=composition,
-                    model=model,
-                    feature_list=feature_list,
-                    validate=False
-                )
-                Z[i, j] = preds[target]
-            except:
-                Z[i, j] = np.nan
-    
-    logger.info(f"Surface generee: {param1} vs {param2} -> {target}")
-    
-    return X, Y, Z
+    # ═══════════════════════════════════════════════════════════
+    # FALLBACK : Méthode legacy (si nouveau moteur non disponible)
+    # ═══════════════════════════════════════════════════════════
+    else:
+        from config.constants import BOUNDS
+        from app.core.predictor import predict_concrete_properties
+        
+        x_range = np.linspace(BOUNDS[param1]['min'], BOUNDS[param1]['max'], n_points)
+        y_range = np.linspace(BOUNDS[param2]['min'], BOUNDS[param2]['max'], n_points)
+        
+        X, Y = np.meshgrid(x_range, y_range)
+        Z = np.zeros_like(X)
+        
+        for i in range(n_points):
+            for j in range(n_points):
+                composition = baseline.copy()
+                composition[param1] = float(X[i, j])
+                composition[param2] = float(Y[i, j])
+                
+                try:
+                    if target == 'CO2':
+                        # Support CO₂ même en mode legacy
+                        from app.core.co2_calculator import CO2Calculator
+                        co2_calc = CO2Calculator()
+                        co2_result = co2_calc.calculate(composition, cement_type)
+                        Z[i, j] = co2_result.co2_total_kg_m3
+                    else:
+                        preds = predict_concrete_properties(
+                            composition=composition,
+                            model=model,
+                            feature_list=feature_list,
+                            validate=False
+                        )
+                        Z[i, j] = preds[target]
+                except:
+                    Z[i, j] = np.nan
+        
+        return X, Y, Z
 
 
 def plot_response_surface_3d(

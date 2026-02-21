@@ -103,15 +103,15 @@ class DatabaseManager:
             
             cursor.execute("SELECT version();")
             version = cursor.fetchone()[0]
-            logger.info(f"[DB INFO] PostgreSQL: {version[:50]}...")
+            logger.info(f"PostgreSQL: {version[:50]}...")
             
             cursor.execute("SELECT current_database();")
             db_name = cursor.fetchone()[0]
-            logger.info(f"[DB INFO] Database: {db_name}")
+            logger.info(f"Database: {db_name}")
             
             cursor.execute("SELECT current_user;")
             user = cursor.fetchone()[0]
-            logger.info(f"[DB INFO] User: {user}")
+            logger.info(f"User: {user}")
             
             # Vérifier table predictions
             cursor.execute("""
@@ -126,15 +126,15 @@ class DatabaseManager:
             if table_exists:
                 cursor.execute("SELECT COUNT(*) FROM predictions;")
                 count = cursor.fetchone()[0]
-                logger.info(f"[DB INFO] Table 'predictions': OK ({count} enregistrements)")
+                logger.info(f"Table 'predictions': OK ({count} enregistrements)")
             else:
-                logger.warning("[DB INFO] Table 'predictions': INTROUVABLE")
+                logger.warning("Table 'predictions': INTROUVABLE")
             
             cursor.close()
             self._pool.putconn(conn)
             
         except Exception as e:
-            logger.warning(f"[DB INFO] Impossible de recuperer les infos: {e}")
+            logger.warning(f"Impossible de recuperer les infos: {e}")
     
     def _test_connection(self) -> bool:
         """Test connexion avec retry."""

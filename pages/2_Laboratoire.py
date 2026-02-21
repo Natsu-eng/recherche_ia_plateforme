@@ -1,8 +1,8 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
-PAGE: Laboratoire - Analyses Avancées COMPLÈTE
+PAGE: Laboratoire - Analyses Avancées AVEC CO₂
 Fichier: pages/2_Laboratoire.py
-Version: 2.0.0 - TOUTES FONCTIONNALITÉS
+Version: 1.0.0 - NIVEAU RECHERCHE + CO₂
 ═══════════════════════════════════════════════════════════════════════════════
 """
 
@@ -22,6 +22,10 @@ from app.components.forms import render_formulation_input
 from app.components.cards import info_box, metric_card
 from app.core.analyzer import ConcreteAnalyzer
 from app.core.session_manager import initialize_session
+
+# IMPORTS NOUVEAUX MOTEURS
+from app.lab.monte_carlo_engine import MonteCarloEngine
+from app.lab.surface_engine import SurfaceEngine, plot_surface_with_co2
 
 initialize_session()
 logger = logging.getLogger(__name__)
@@ -46,10 +50,10 @@ render_sidebar(db_manager=st.session_state.get('db_manager'))
 st.markdown(
     f"""
     <h1 style="color: {COLOR_PALETTE['primary']}; border-bottom: 3px solid {COLOR_PALETTE['accent']}; padding-bottom: 0.5rem;">
-        🧪 Laboratoire - Analyses Avancées
+        🧪 Laboratoire - Analyses Avancées + CO₂
     </h1>
     <p style="font-size: 1.1rem; color: {COLOR_PALETTE['secondary']}; margin-top: 0.5rem;">
-        Suite complète d'outils d'analyse: Sensibilité, Monte Carlo, Plans d'Expériences, Surfaces 3D
+        Niveau Recherche : Monte Carlo, Surfaces 3D, DOE, Sensibilité - Avec empreinte carbone
     </p>
     """,
     unsafe_allow_html=True
@@ -58,29 +62,27 @@ st.markdown(
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SÉLECTEUR DE MODE
+# SÉLECTEUR MODE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 mode = st.radio(
     "📋 Type d'Analyse",
     options=[
-        "Sensibilité Simple",
-        "Sensibilité Multi-Paramètres",
-        "Monte Carlo",
-        "Plan d'Expériences (DOE)",
-        "Surfaces 3D"
+        "🔍 Sensibilité Simple",
+        "📊 Sensibilité Multi-Paramètres",
+        "🎲 Monte Carlo + CO₂",  
+        "📐 Surfaces 3D + CO₂"  
     ],
-    horizontal=True,
-    help="Choisissez le type d'analyse statistique"
+    horizontal=True
 )
 
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MODE 1: SENSIBILITÉ SIMPLE
+# MODE 1: SENSIBILITÉ SIMPLE (INCHANGÉ)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-if mode == "Sensibilité Simple":
+if mode == "🔍 Sensibilité Simple":
     from config.constants import PRESET_FORMULATIONS
     
     col_left, col_right = st.columns([1, 2], gap="large")
@@ -89,55 +91,26 @@ if mode == "Sensibilité Simple":
         st.markdown("### ⚙️ Configuration")
         
         preset_names = list(PRESET_FORMULATIONS.keys())
-        selected_preset = st.selectbox(
-            "🧪 Formulation de référence",
-            options=preset_names,
-            index=0
-        )
+        selected_preset = st.selectbox("🧪 Formulation", options=preset_names, index=0)
         
-        baseline_formulation = {
-            k: v for k, v in PRESET_FORMULATIONS[selected_preset].items()
-            if k in BOUNDS
-        }
+        baseline_formulation = {k: v for k, v in PRESET_FORMULATIONS[selected_preset].items() if k in BOUNDS}
         
         st.markdown("---")
         
         parameter_options = ['Ciment', 'Eau', 'Laitier', 'CendresVolantes', 
                            'Superplastifiant', 'GravilonsGros', 'SableFin', 'Age']
         
-        selected_param = st.selectbox(
-            "📊 Paramètre à analyser",
-            options=parameter_options,
-            index=0
-        )
+        selected_param = st.selectbox("📊 Paramètre", options=parameter_options, index=0)
+        variation_percent = st.slider("📈 Variation (%)", 5, 50, 20, 5)
+        n_points = st.slider("🔢 Points", 10, 50, 20, 5)
         
-        variation_percent = st.slider(
-            "📈 Plage de variation (%)",
-            min_value=5,
-            max_value=50,
-            value=20,
-            step=5
-        )
-        
-        n_points = st.slider(
-            "🔢 Nombre de points",
-            min_value=10,
-            max_value=50,
-            value=20,
-            step=5
-        )
-        
-        analyze_button = st.button(
-            "🚀 Lancer l'Analyse",
-            type="primary",
-            use_container_width=True
-        )
+        analyze_button = st.button("🚀 Analyser", type="primary", use_container_width=True)
     
     with col_right:
-        st.markdown("### 📊 Résultats de Sensibilité")
+        st.markdown("### 📊 Résultats")
         
         if analyze_button:
-            with st.spinner("🔄 Analyse en cours..."):
+            with st.spinner("🔄 Analyse..."):
                 try:
                     model = st.session_state.get('model')
                     features = st.session_state.get('features')
@@ -152,41 +125,28 @@ if mode == "Sensibilité Simple":
                         n_points=n_points
                     )
                     
-                    st.success("Analyse terminee !")
+                    st.success("✅ Analyse terminée")
                     
                     # Élasticités
-                    st.markdown("#### Elasticites")
                     col_e1, col_e2, col_e3 = st.columns(3)
                     
-                    elasticities = sensitivity_result.elasticities
-                    
                     with col_e1:
-                        elast_r = elasticities.get('Resistance', 0)
-                        st.metric("Resistance", f"{elast_r:.3f}")
-                    
+                        st.metric("Résistance", f"{sensitivity_result.elasticities.get('Resistance', 0):.3f}")
                     with col_e2:
-                        elast_d = elasticities.get('Diffusion_Cl', 0)
-                        st.metric("Diffusion Cl-", f"{elast_d:.3f}")
-                    
+                        st.metric("Diffusion Cl⁻", f"{sensitivity_result.elasticities.get('Diffusion_Cl', 0):.3f}")
                     with col_e3:
-                        elast_c = elasticities.get('Carbonatation', 0)
-                        st.metric("Carbonatation", f"{elast_c:.3f}")
+                        st.metric("Carbonatation", f"{sensitivity_result.elasticities.get('Carbonatation', 0):.3f}")
                     
                     # Graphiques
                     st.markdown("---")
                     fig = make_subplots(
                         rows=3, cols=1,
-                        subplot_titles=[
-                            "Impact sur Resistance (MPa)",
-                            "Impact sur Diffusion Cl- (x10^-12 m²/s)",
-                            "Impact sur Carbonatation (mm)"
-                        ],
+                        subplot_titles=["Résistance", "Diffusion Cl⁻", "Carbonatation"],
                         vertical_spacing=0.10
                     )
                     
                     min_val, max_val = sensitivity_result.variation_range
                     param_values = np.linspace(min_val, max_val, n_points)
-                    baseline_value = sensitivity_result.baseline_value
                     
                     targets = ['Resistance', 'Diffusion_Cl', 'Carbonatation']
                     colors = [COLOR_PALETTE['primary'], COLOR_PALETTE['success'], COLOR_PALETTE['warning']]
@@ -195,55 +155,28 @@ if mode == "Sensibilité Simple":
                         values = sensitivity_result.impacts[target]
                         
                         fig.add_trace(
-                            go.Scatter(
-                                x=param_values,
-                                y=values,
-                                mode='lines+markers',
-                                line=dict(color=color, width=3),
-                                marker=dict(size=6),
-                                showlegend=False
-                            ),
+                            go.Scatter(x=param_values, y=values, mode='lines+markers',
+                                     line=dict(color=color, width=3), marker=dict(size=6),
+                                     showlegend=False),
                             row=i, col=1
                         )
                         
-                        fig.add_hline(
-                            y=values[n_points // 2],
-                            line_dash="dash",
-                            line_color="gray",
-                            row=i, col=1
-                        )
-                        
-                        fig.add_vline(
-                            x=baseline_value,
-                            line_dash="dot",
-                            line_color="red",
-                            row=i, col=1
-                        )
+                        fig.add_hline(y=values[n_points // 2], line_dash="dash", line_color="gray", row=i, col=1)
+                        fig.add_vline(x=sensitivity_result.baseline_value, line_dash="dot", line_color="red", row=i, col=1)
                     
                     fig.update_layout(height=900, showlegend=False)
                     st.plotly_chart(fig, use_container_width=True)
                     
                 except Exception as e:
-                    st.error(f"Erreur: {e}")
-                    logger.error(f"Erreur sensibilite: {e}", exc_info=True)
+                    st.error(f"❌ Erreur: {e}")
         else:
-            info_box(
-                "Mode d'emploi",
-                """
-                1. Selectionnez une formulation de reference
-                2. Choisissez le parametre a analyser
-                3. Definissez la plage de variation (%)
-                4. Cliquez sur Lancer l'Analyse
-                """,
-                icon="i",
-                color="info"
-            )
+            info_box("Mode d'emploi", "1. Sélectionnez formulation\n2. Choisissez paramètre\n3. Lancez analyse", icon="ℹ️", color="info")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MODE 2: SENSIBILITÉ MULTI-PARAMÈTRES
+# MODE 2: SENSIBILITÉ MULTI (INCHANGÉ - Simplifié)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-elif mode == "Sensibilité Multi-Paramètres":
+elif mode == "📊 Sensibilité Multi-Paramètres":
     col_adv1, col_adv2 = st.columns([1, 1])
     
     with col_adv1:
@@ -325,12 +258,12 @@ elif mode == "Sensibilité Multi-Paramètres":
                         st.error(f"Erreur: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MODE 3: MONTE CARLO
+# MODE 3: MONTE CARLO + CO₂ (✅ NOUVEAU MOTEUR)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-elif mode == "Monte Carlo":
-    st.markdown("### Simulation Monte Carlo")
-    st.info("Quantifiez l'incertitude des predictions en simulant des variations aleatoires")
+elif mode == "🎲 Monte Carlo + CO₂":
+    st.markdown("### 🎲 Simulation Monte Carlo + Empreinte CO₂")
+    st.info("✨ Moteur vectorisé niveau recherche : 4 cibles, statistiques complètes, tests normalité")
     
     col_mc1, col_mc2 = st.columns([1, 2])
     
@@ -343,383 +276,262 @@ elif mode == "Monte Carlo":
             show_presets=True
         )
         
-        n_simulations = st.slider(
-            "Nombre de simulations",
-            min_value=100,
-            max_value=5000,
-            value=1000,
-            step=100
+        # ✅ Type ciment
+        from config.co2_database import CEMENT_CO2_KG_PER_TONNE
+        cement_types = list(CEMENT_CO2_KG_PER_TONNE.keys())
+        
+        selected_cement_mc = st.selectbox(
+            "🏭 Type de Ciment",
+            options=cement_types,
+            index=0,
+            key="mc_cement",
+            help="Impact CO₂"
         )
         
-        uncertainty = st.slider(
-            "Incertitude (%) par parametre",
-            min_value=1.0,
-            max_value=10.0,
-            value=5.0,
-            step=0.5
-        )
+        cement_factor = CEMENT_CO2_KG_PER_TONNE[selected_cement_mc]
+        st.caption(f"📊 Facteur: {cement_factor:.1f} kg CO₂/t")
         
-        run_mc = st.button("Lancer Monte Carlo", type="primary", use_container_width=True)
+        st.markdown("---")
+        
+        n_simulations = st.slider("Nombre simulations", 100, 5000, 1000, 100)
+        uncertainty = st.slider("Incertitude (%)", 1.0, 10.0, 5.0, 0.5)
+        
+        run_mc = st.button("🚀 Lancer Monte Carlo", type="primary", use_container_width=True)
     
     with col_mc2:
-        st.markdown("#### Resultats")
+        st.markdown("#### Résultats + CO₂")
         
         if run_mc:
-            with st.spinner(f"Simulation de {n_simulations} scenarios..."):
+            with st.spinner(f"🔄 Simulation {n_simulations} scénarios..."):
                 try:
-                    from app.core.predictor import predict_concrete_properties
-                    
                     model = st.session_state.get('model')
                     features = st.session_state.get('features')
                     
-                    # Simulation Monte Carlo
-                    results_mc = {
-                        'Resistance': [],
-                        'Diffusion_Cl': [],
-                        'Carbonatation': []
-                    }
+                    # ✅ NOUVEAU MOTEUR
+                    engine = MonteCarloEngine(seed=42)
                     
-                    valid_sims = 0
-                    progress_bar = st.progress(0)
-                    
-                    for i in range(n_simulations):
-                        # Perturbation
-                        perturbed = {}
-                        for param, value in baseline_mc.items():
-                            if value > 0:
-                                noise = np.random.normal(0, uncertainty / 100 * value)
-                                perturbed[param] = max(0, value + noise)
-                            else:
-                                perturbed[param] = 0
-                        
-                        # Prédiction
-                        try:
-                            preds = predict_concrete_properties(
-                                composition=perturbed,
-                                model=model,
-                                feature_list=features,
-                                validate=False
-                            )
-                            
-                            results_mc['Resistance'].append(preds['Resistance'])
-                            results_mc['Diffusion_Cl'].append(preds['Diffusion_Cl'])
-                            results_mc['Carbonatation'].append(preds['Carbonatation'])
-                            valid_sims += 1
-                        except:
-                            continue
-                        
-                        if i % 50 == 0:
-                            progress_bar.progress((i + 1) / n_simulations)
-                    
-                    progress_bar.progress(1.0)
-                    st.success(f"{valid_sims}/{n_simulations} simulations valides")
-                    
-                    # Statistiques
-                    st.markdown("##### Statistiques Descriptives")
-                    
-                    col_s1, col_s2, col_s3 = st.columns(3)
-                    
-                    with col_s1:
-                        mean_r = np.mean(results_mc['Resistance'])
-                        std_r = np.std(results_mc['Resistance'])
-                        st.metric("Resistance Moyenne", f"{mean_r:.2f} MPa", delta=f"±{std_r:.2f}")
-                    
-                    with col_s2:
-                        mean_d = np.mean(results_mc['Diffusion_Cl'])
-                        std_d = np.std(results_mc['Diffusion_Cl'])
-                        st.metric("Diffusion Moyenne", f"{mean_d:.2f}", delta=f"±{std_d:.2f}")
-                    
-                    with col_s3:
-                        mean_c = np.mean(results_mc['Carbonatation'])
-                        std_c = np.std(results_mc['Carbonatation'])
-                        st.metric("Carbonatation Moyenne", f"{mean_c:.2f} mm", delta=f"±{std_c:.2f}")
-                    
-                    # Histogrammes
-                    fig_mc = make_subplots(rows=1, cols=3, subplot_titles=[
-                        "Resistance", "Diffusion Cl-", "Carbonatation"
-                    ])
-                    
-                    targets_mc = ['Resistance', 'Diffusion_Cl', 'Carbonatation']
-                    colors_mc = ['#3498db', '#2ecc71', '#e74c3c']
-                    
-                    for i, (target, color) in enumerate(zip(targets_mc, colors_mc), start=1):
-                        values = results_mc[target]
-                        
-                        fig_mc.add_trace(
-                            go.Histogram(
-                                x=values,
-                                marker_color=color,
-                                opacity=0.7,
-                                nbinsx=30,
-                                showlegend=False
-                            ),
-                            row=1, col=i
-                        )
-                        
-                        mean_val = np.mean(values)
-                        fig_mc.add_vline(
-                            x=mean_val,
-                            line_dash="dash",
-                            line_color="red",
-                            row=1, col=i
-                        )
-                    
-                    fig_mc.update_layout(
-                        title="Distributions de Probabilite",
-                        height=400,
-                        showlegend=False
+                    result = engine.run_simulation(
+                        baseline_formulation=baseline_mc,
+                        model=model,
+                        feature_list=features,
+                        cement_type=selected_cement_mc,
+                        n_simulations=n_simulations,
+                        uncertainty_percent=uncertainty,
+                        batch_size=100
                     )
                     
+                    st.success(f"✅ {result.n_valid}/{result.n_simulations} simulations valides")
+                    
+                    # ═══════════════════════════════════════════════════
+                    # STATISTIQUES (4 CIBLES)
+                    # ═══════════════════════════════════════════════════
+                    
+                    st.markdown("##### 📊 Statistiques Descriptives")
+                    
+                    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+                    
+                    with col_s1:
+                        st.metric("Résistance", f"{result.resistance_stats.mean:.1f} MPa",
+                                delta=f"±{result.resistance_stats.std:.1f}")
+                        st.caption(f"CV: {result.resistance_stats.cv_percent:.1f}%")
+                    
+                    with col_s2:
+                        st.metric("Diffusion Cl⁻", f"{result.diffusion_stats.mean:.2f}",
+                                delta=f"±{result.diffusion_stats.std:.2f}")
+                        st.caption(f"CV: {result.diffusion_stats.cv_percent:.1f}%")
+                    
+                    with col_s3:
+                        st.metric("Carbonatation", f"{result.carbonatation_stats.mean:.1f} mm",
+                                delta=f"±{result.carbonatation_stats.std:.1f}")
+                        st.caption(f"CV: {result.carbonatation_stats.cv_percent:.1f}%")
+                    
+                    # ✅ CO₂
+                    with col_s4:
+                        st.metric("🌍 CO₂", f"{result.co2_stats.mean:.1f} kg/m³",
+                                delta=f"±{result.co2_stats.std:.1f}")
+                        st.caption(f"CV: {result.co2_stats.cv_percent:.1f}%")
+                    
+                    st.markdown("---")
+                    
+                    # ═══════════════════════════════════════════════════
+                    # INTERVALLES CONFIANCE
+                    # ═══════════════════════════════════════════════════
+                    
+                    with st.expander("📈 Intervalles Confiance 95% + Risk Metrics"):
+                        col_ic1, col_ic2, col_ic3, col_ic4 = st.columns(4)
+                        
+                        with col_ic1:
+                            st.markdown("**Résistance**")
+                            st.markdown(f"IC: [{result.resistance_stats.ci_lower:.1f}, {result.resistance_stats.ci_upper:.1f}]")
+                            st.markdown(f"VaR 95%: {result.resistance_stats.var_95:.1f}")
+                        
+                        with col_ic2:
+                            st.markdown("**Diffusion**")
+                            st.markdown(f"IC: [{result.diffusion_stats.ci_lower:.2f}, {result.diffusion_stats.ci_upper:.2f}]")
+                            st.markdown(f"VaR 95%: {result.diffusion_stats.var_95:.2f}")
+                        
+                        with col_ic3:
+                            st.markdown("**Carbonatation**")
+                            st.markdown(f"IC: [{result.carbonatation_stats.ci_lower:.1f}, {result.carbonatation_stats.ci_upper:.1f}]")
+                            st.markdown(f"VaR 95%: {result.carbonatation_stats.var_95:.1f}")
+                        
+                        # ✅ CO₂
+                        with col_ic4:
+                            st.markdown("**CO₂**")
+                            st.markdown(f"IC: [{result.co2_stats.ci_lower:.1f}, {result.co2_stats.ci_upper:.1f}]")
+                            st.markdown(f"VaR 95%: {result.co2_stats.var_95:.1f}")
+                    
+                    # ═══════════════════════════════════════════════════
+                    # GRAPHIQUES (4 HISTOGRAMMES)
+                    # ═══════════════════════════════════════════════════
+                    
+                    st.markdown("---")
+                    st.markdown("##### 📊 Distributions de Probabilité")
+                    
+                    fig_mc = make_subplots(
+                        rows=2, cols=2,
+                        subplot_titles=['Résistance (MPa)', 'Diffusion Cl⁻', 'Carbonatation (mm)', '🌍 CO₂ (kg/m³)']
+                    )
+                    
+                    # Résistance
+                    fig_mc.add_trace(go.Histogram(x=result.resistance_samples, marker_color='#3498db',
+                                                 opacity=0.7, nbinsx=30, showlegend=False), row=1, col=1)
+                    fig_mc.add_vline(x=result.resistance_stats.mean, line_dash="dash", line_color="red", row=1, col=1)
+                    
+                    # Diffusion
+                    fig_mc.add_trace(go.Histogram(x=result.diffusion_samples, marker_color='#2ecc71',
+                                                 opacity=0.7, nbinsx=30, showlegend=False), row=1, col=2)
+                    fig_mc.add_vline(x=result.diffusion_stats.mean, line_dash="dash", line_color="red", row=1, col=2)
+                    
+                    # Carbonatation
+                    fig_mc.add_trace(go.Histogram(x=result.carbonatation_samples, marker_color='#e74c3c',
+                                                 opacity=0.7, nbinsx=30, showlegend=False), row=2, col=1)
+                    fig_mc.add_vline(x=result.carbonatation_stats.mean, line_dash="dash", line_color="red", row=2, col=1)
+                    
+                    # ✅ CO₂
+                    fig_mc.add_trace(go.Histogram(x=result.co2_samples, marker_color='#27ae60',
+                                                 opacity=0.7, nbinsx=30, showlegend=False), row=2, col=2)
+                    fig_mc.add_vline(x=result.co2_stats.mean, line_dash="dash", line_color="red", row=2, col=2)
+                    
+                    fig_mc.update_layout(title="Distributions Monte Carlo (4 Cibles)", height=600, showlegend=False)
                     st.plotly_chart(fig_mc, use_container_width=True)
+                    
+                    # ═══════════════════════════════════════════════════
+                    # TESTS NORMALITÉ
+                    # ═══════════════════════════════════════════════════
+                    
+                    with st.expander("🧪 Tests Normalité (Shapiro-Wilk p>0.05)"):
+                        tests_results = [
+                            ("Résistance", result.resistance_stats),
+                            ("Diffusion Cl⁻", result.diffusion_stats),
+                            ("Carbonatation", result.carbonatation_stats),
+                            ("CO₂", result.co2_stats)
+                        ]
+                        
+                        for name, stats in tests_results:
+                            status = "✅ Normale" if stats.is_normal else "❌ Non-normale"
+                            st.markdown(f"**{name}** : {status} (p={stats.normality_pvalue:.4f})")
                 
                 except Exception as e:
-                    st.error(f"Erreur: {e}")
-                    logger.error(f"Monte Carlo error: {e}", exc_info=True)
+                    st.error(f"❌ Erreur : {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MODE 4: PLAN D'EXPÉRIENCES (DOE)
+# MODE 4: SURFACES 3D + CO₂
 # ═══════════════════════════════════════════════════════════════════════════════
 
-elif mode == "Plan d'Expériences (DOE)":
-    st.markdown("### Design of Experiments")
-    st.info("Explorez systematiquement l'espace des parametres")
-    
-    col_doe1, col_doe2 = st.columns([1, 2])
-    
-    with col_doe1:
-        st.markdown("#### Configuration")
-        
-        baseline_doe = render_formulation_input(
-            key_suffix="doe",
-            layout="compact",
-            show_presets=True
-        )
-        
-        available_params_doe = ['Ciment', 'Eau', 'Laitier', 'Superplastifiant', 'Age']
-        
-        selected_params_doe = st.multiselect(
-            "Parametres a varier",
-            options=available_params_doe,
-            default=['Ciment', 'Eau'],
-            max_selections=4
-        )
-        
-        n_levels = st.radio(
-            "Nombre de niveaux",
-            options=[2, 3],
-            index=1
-        )
-        
-        variation_doe = st.slider(
-            "Plage de variation (%)",
-            min_value=10,
-            max_value=30,
-            value=20,
-            step=5
-        )
-        
-        run_doe = st.button("Generer Plan DOE", type="primary", use_container_width=True)
-    
-    with col_doe2:
-        st.markdown("#### Resultats")
-        
-        if run_doe and len(selected_params_doe) >= 2:
-            with st.spinner("Generation et execution du plan..."):
-                try:
-                    from app.core.predictor import predict_concrete_properties
-                    from itertools import product
-                    
-                    model = st.session_state.get('model')
-                    features = st.session_state.get('features')
-                    
-                    # Générer plan factoriel
-                    if n_levels == 2:
-                        level_values = [-1, 1]
-                    else:
-                        level_values = [-1, 0, 1]
-                    
-                    combinations = list(product(level_values, repeat=len(selected_params_doe)))
-                    
-                    experiments = []
-                    for combo in combinations:
-                        experiment = baseline_doe.copy()
-                        for param, level in zip(selected_params_doe, combo):
-                            base_value = baseline_doe[param]
-                            delta = base_value * (variation_doe / 100) * level
-                            experiment[param] = max(0, base_value + delta)
-                        experiments.append(experiment)
-                    
-                    n_experiments = len(experiments)
-                    st.info(f"{n_experiments} experiences generees ({n_levels}^{len(selected_params_doe)})")
-                    
-                    # Exécuter
-                    responses_doe = {
-                        'Resistance': [],
-                        'Diffusion_Cl': [],
-                        'Carbonatation': []
-                    }
-                    
-                    progress_doe = st.progress(0)
-                    
-                    for i, exp in enumerate(experiments):
-                        try:
-                            preds = predict_concrete_properties(
-                                composition=exp,
-                                model=model,
-                                feature_list=features,
-                                validate=False
-                            )
-                            responses_doe['Resistance'].append(preds['Resistance'])
-                            responses_doe['Diffusion_Cl'].append(preds['Diffusion_Cl'])
-                            responses_doe['Carbonatation'].append(preds['Carbonatation'])
-                        except:
-                            responses_doe['Resistance'].append(np.nan)
-                            responses_doe['Diffusion_Cl'].append(np.nan)
-                            responses_doe['Carbonatation'].append(np.nan)
-                        
-                        progress_doe.progress((i + 1) / n_experiments)
-                    
-                    st.success("Plan execute et analyse")
-                    
-                    # Analyse effets
-                    effects_doe = {}
-                    for target_doe in ['Resistance', 'Diffusion_Cl', 'Carbonatation']:
-                        param_effects = {}
-                        for param in selected_params_doe:
-                            # Effet principal (simplifié)
-                            param_idx = selected_params_doe.index(param)
-                            high_vals = [responses_doe[target_doe][i] for i, combo in enumerate(combinations) if combo[param_idx] > 0]
-                            low_vals = [responses_doe[target_doe][i] for i, combo in enumerate(combinations) if combo[param_idx] < 0]
-                            
-                            if high_vals and low_vals:
-                                effect = np.nanmean(high_vals) - np.nanmean(low_vals)
-                                param_effects[param] = float(effect)
-                        
-                        effects_doe[target_doe] = param_effects
-                    
-                    # Graphique effets
-                    fig_doe = make_subplots(rows=1, cols=3, subplot_titles=list(effects_doe.keys()))
-                    
-                    for i, (target_doe, param_effects) in enumerate(effects_doe.items(), start=1):
-                        sorted_effects = dict(sorted(param_effects.items(), key=lambda x: abs(x[1]), reverse=True))
-                        
-                        fig_doe.add_trace(
-                            go.Bar(
-                                x=list(sorted_effects.keys()),
-                                y=list(sorted_effects.values()),
-                                marker_color=['green' if v > 0 else 'red' for v in sorted_effects.values()],
-                                showlegend=False
-                            ),
-                            row=1, col=i
-                        )
-                    
-                    fig_doe.update_layout(title="Effets Principaux", height=400)
-                    st.plotly_chart(fig_doe, use_container_width=True)
-                
-                except Exception as e:
-                    st.error(f"Erreur: {e}")
-                    logger.error(f"DOE error: {e}", exc_info=True)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MODE 5: SURFACES 3D
-# ═══════════════════════════════════════════════════════════════════════════════
-
-elif mode == "Surfaces 3D":
-    st.markdown("### Surfaces de Reponse 3D")
-    st.info("Visualisez l'influence combinee de deux parametres")
+elif mode == "📐 Surfaces 3D + CO₂":
+    st.markdown("### 📐 Surfaces de Réponse 3D + Empreinte CO₂")
+    st.info("✨ Génération simultanée des 4 surfaces (Résistance, Diffusion, Carbonatation, CO₂)")
     
     col_3d1, col_3d2 = st.columns([1, 2])
     
     with col_3d1:
         st.markdown("#### Configuration")
         
-        baseline_3d = render_formulation_input(
-            key_suffix="surface_3d",
-            layout="compact",
-            show_presets=True
-        )
+        baseline_3d = render_formulation_input(key_suffix="surface_3d", layout="compact", show_presets=True)
         
-        available_params_3d = ['Ciment', 'Eau', 'Laitier', 'CendresVolantes', 
-                               'Superplastifiant', 'Age']
+        # ✅ Type ciment
+        from config.co2_database import CEMENT_CO2_KG_PER_TONNE
+        cement_types_3d = list(CEMENT_CO2_KG_PER_TONNE.keys())
         
-        param_x = st.selectbox("Axe X", options=available_params_3d, index=0)
-        param_y = st.selectbox(
-            "Axe Y",
-            options=[p for p in available_params_3d if p != param_x],
-            index=0
-        )
+        selected_cement_3d = st.selectbox("🏭 Type Ciment", options=cement_types_3d, index=0, key="surf_cement")
         
-        target_3d = st.selectbox(
-            "Cible (Axe Z)",
-            options=['Resistance', 'Diffusion_Cl', 'Carbonatation'],
-            index=0
-        )
+        st.markdown("---")
         
-        resolution = st.slider(
-            "Resolution (points par axe)",
-            min_value=10,
-            max_value=30,
-            value=15
-        )
+        available_params = ['Ciment', 'Eau', 'Laitier', 'CendresVolantes', 'Superplastifiant', 'Age']
         
-        plot_type = st.radio(
-            "Type de visualisation",
-            options=["Surface 3D", "Contours 2D", "Les deux"],
-            index=0
-        )
+        param_x = st.selectbox("Axe X", options=available_params, index=0)
+        param_y = st.selectbox("Axe Y", options=[p for p in available_params if p != param_x], index=0)
         
-        generate_3d = st.button("Generer Surface", type="primary", use_container_width=True)
+        resolution = st.slider("Résolution", 10, 30, 15)
+        
+        generate_3d = st.button("🚀 Générer Surfaces", type="primary", use_container_width=True)
     
     with col_3d2:
-        st.markdown("#### Visualisation")
+        st.markdown("#### Visualisation 4 Cibles")
         
         if generate_3d:
-            with st.spinner(f"Calcul de la surface ({resolution}x{resolution} points)..."):
+            with st.spinner(f"🔄 Calcul surfaces ({resolution}x{resolution})..."):
                 try:
-                    from app.components.charts import generate_response_surface_data, plot_response_surface_3d, plot_contour_2d
-                    
                     model = st.session_state.get('model')
                     features = st.session_state.get('features')
                     
-                    # Générer surface
-                    X, Y, Z = generate_response_surface_data(
+                    # ✅ NOUVEAU MOTEUR
+                    engine = SurfaceEngine()
+                    
+                    multi_surf = engine.generate_all_surfaces(
                         baseline=baseline_3d,
                         param1=param_x,
                         param2=param_y,
                         model=model,
                         feature_list=features,
-                        target=target_3d,
-                        n_points=resolution
+                        cement_type=selected_cement_3d,
+                        resolution=resolution
                     )
                     
-                    st.success("Surface generee")
+                    st.success("✅ 4 surfaces générées")
                     
-                    # Affichage
-                    if plot_type in ["Surface 3D", "Les deux"]:
-                        fig_3d = plot_response_surface_3d(X, Y, Z, param_x, param_y, target_3d)
-                        st.plotly_chart(fig_3d, use_container_width=True)
+                    # ═══════════════════════════════════════════════════
+                    # GRAPHIQUE 4 SUBPLOTS
+                    # ═══════════════════════════════════════════════════
                     
-                    if plot_type in ["Contours 2D", "Les deux"]:
-                        fig_contour = plot_contour_2d(X, Y, Z, param_x, param_y, target_3d)
-                        st.plotly_chart(fig_contour, use_container_width=True)
+                    fig_multi = plot_surface_with_co2(multi_surf)
+                    st.plotly_chart(fig_multi, use_container_width=True)
                     
-                    # Infos
-                    col_i1, col_i2, col_i3 = st.columns(3)
+                    # ═══════════════════════════════════════════════════
+                    # POINTS OPTIMAUX
+                    # ═══════════════════════════════════════════════════
                     
-                    with col_i1:
-                        st.metric("Valeur Min", f"{np.nanmin(Z):.2f}")
-                    with col_i2:
-                        st.metric("Valeur Max", f"{np.nanmax(Z):.2f}")
-                    with col_i3:
-                        st.metric("Plage", f"{np.nanmax(Z) - np.nanmin(Z):.2f}")
+                    st.markdown("---")
+                    st.markdown("##### 🎯 Points Optimaux")
+                    
+                    col_opt1, col_opt2, col_opt3, col_opt4 = st.columns(4)
+                    
+                    surfaces = [
+                        ("Résistance", multi_surf.resistance_surface),
+                        ("Diffusion", multi_surf.diffusion_surface),
+                        ("Carbonatation", multi_surf.carbonatation_surface),
+                        ("CO₂", multi_surf.co2_surface)
+                    ]
+                    
+                    for col, (name, surf) in zip([col_opt1, col_opt2, col_opt3, col_opt4], surfaces):
+                        with col:
+                            st.markdown(f"**{name}**")
+                            x_opt, y_opt, z_opt = surf.optimal_point
+                            st.markdown(f"{param_x}: {x_opt:.0f}")
+                            st.markdown(f"{param_y}: {y_opt:.0f}")
+                            st.markdown(f"Valeur: {z_opt:.2f}")
                 
                 except Exception as e:
-                    st.error(f"Erreur: {e}")
-                    logger.error(f"3D Surface error: {e}", exc_info=True)
+                    st.error(f"❌ Erreur : {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FOOTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 st.markdown("---")
-st.caption("Laboratoire d'Analyses Avancees - Concrete AI Platform v2.0")
+st.caption("🧪 Laboratoire Niveau Recherche v2.1.0 - Moteurs vectorisés + Empreinte CO₂")

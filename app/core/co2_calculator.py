@@ -47,7 +47,7 @@ class CO2Calculator:
         """Initialise le calculateur."""
         self.co2_factors = CO2_FACTORS_KG_PER_TONNE
         self.cement_co2 = CEMENT_CO2_KG_PER_TONNE
-        logger.debug("[CO2] Calculateur initialisé")
+        logger.debug("Calculateur initialisé")
     
     def calculate(
         self,
@@ -145,7 +145,7 @@ class CO2Calculator:
             )
             
             logger.info(
-                f"[CO2] Empreinte calculée: {co2_total:.1f} kg CO₂/m³ "
+                f"Empreinte calculée: {co2_total:.1f} kg CO₂/m³ "
                 f"(Ciment {cement_type})"
             )
             
@@ -167,7 +167,7 @@ class CO2Calculator:
             )
         
         except ValueError as e:
-            logger.error(f"[CO2] Validation error: {e}")
+            logger.error(f"Validation error: {e}")
             raise
         
         except Exception as e:

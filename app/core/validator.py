@@ -93,6 +93,7 @@ class ValidationReport:
     exposure_class: Optional[str]
     resistance_class: Optional[str]
     compliance_score: float
+    exposure_classes: Optional[List[str]] = None  # Classes d'exposition identifiées
     
     def get_critical_alerts(self) -> List[ValidationAlert]:
         """Retourne alertes critiques seulement"""
@@ -434,6 +435,74 @@ def validate_cement_content(ciment: float, liant_total: float) -> List[Validatio
 # ═══════════════════════════════════════════════════════════════════════════════
 # VALIDATION COMPLÈTE
 # ═══════════════════════════════════════════════════════════════════════════════
+def validate_en206_exposure_strict(
+    exposure_class: str,
+    ratio_el: float,
+    resistance: float,
+    liant_total: float
+) -> List[ValidationAlert]:
+    """
+    Validation normative stricte selon classe d'exposition EN 206.
+    Compare formulation réelle aux exigences officielles.
+    """
+
+    alerts = []
+
+    if exposure_class not in EXPOSURE_CLASSES:
+        alerts.append(ValidationAlert(
+            severity=Severity.ERROR,
+            category="Classe Exposition",
+            message=f"Classe {exposure_class} inconnue.",
+            recommendation="Vérifier table EXPOSURE_CLASSES.",
+            norm_ref="EN 206"
+        ))
+        return alerts
+
+    specs = EXPOSURE_CLASSES[exposure_class]
+
+    # ─── Vérification Ratio E/L ───
+    if ratio_el > specs["E_L_max"]:
+        alerts.append(ValidationAlert(
+            severity=Severity.ERROR,
+            category="EN 206 - Ratio E/L",
+            message=(
+                f"E/L = {ratio_el:.3f} > {specs['E_L_max']} "
+                f"(limite {exposure_class})"
+            ),
+            recommendation="Réduire eau ou augmenter liant.",
+            norm_ref="EN 206 - Tableau 4"
+        ))
+
+    # ─── Vérification Résistance minimale ───
+    if resistance < specs["fc_min"]:
+        alerts.append(ValidationAlert(
+            severity=Severity.ERROR,
+            category="EN 206 - Résistance minimale",
+            message=(
+                f"Résistance = {resistance:.1f} MPa < "
+                f"{specs['fc_min']} MPa requis pour {exposure_class}"
+            ),
+            recommendation="Augmenter dosage liant ou réduire E/L.",
+            norm_ref="EN 206"
+        ))
+
+    # ─── Vérification dosage liant sévère (milieu chloruré) ───
+    if exposure_class in ["XD3", "XS2", "XS3"] and liant_total < 360:
+        alerts.append(ValidationAlert(
+            severity=Severity.WARNING,
+            category="Durabilité marine",
+            message=(
+                f"Liant total = {liant_total:.0f} kg/m³ faible "
+                f"pour {exposure_class}"
+            ),
+            recommendation="Recommandé ≥ 360 kg/m³ en environnement sévère.",
+            norm_ref="Guide AFGC"
+        ))
+
+    return alerts
+
+# Dans validator.py, remplacer la section de détermination de classe d'exposition
+# (vers les lignes 520-540)
 
 def validate_formulation(
     composition: Dict[str, float],
@@ -447,6 +516,7 @@ def validate_formulation(
       - Taux substitution (EN 197-1, EN 450-1)
       - Durabilité (diffusion chlorures, carbonatation)
       - Dosage ciment (EN 206)
+      - Classes d'exposition avec moteur industriel
       - Cohérence globale
     
     Args:
@@ -469,14 +539,61 @@ def validate_formulation(
     laitier = composition["Laitier"]
     cendres = composition["CendresVolantes"]
     
+    # ─── DÉTERMINATION DE LA CLASSE D'EXPOSITION AVEC MOTEUR INDUSTRIEL ───
+    from .normative_engines import IndustrialEN206Engine
+    
+    # Initialiser le moteur industriel
+    exposure_engine = IndustrialEN206Engine()
+    
+    # Analyse complète (déterministe)
+    exposure_analysis = exposure_engine.analyze(
+        composition=composition,
+        predictions=predictions
+    )
+    
+    exposure_result = exposure_engine.determine(
+        ratio_el=ratio_el,
+        resistance=resistance,
+        diffusion_cl=diffusion_cl,
+        carbonatation=carbonatation
+    )
+    
+    exposure_class = exposure_result.governing_class
+    
+    # Ajouter des alertes basées sur les recommandations du moteur
+    for rec in exposure_analysis.get("recommendations", []):
+        priority = rec.get("priority", "MOYENNE")
+        severity = Severity.WARNING if priority == "HAUTE" else Severity.INFO
+        
+        # Construire un message détaillé
+        message = rec.get("message", "Point d'amélioration")
+        action = rec.get("action", "")
+        target = rec.get("target", "")
+        current = rec.get("current", "")
+        
+        detailed_recommendation = f"{action} | Cible: {target} | Actuel: {current}"
+        
+        alerts.append(ValidationAlert(
+            severity=severity,
+            category="Optimisation EN 206",
+            message=message,
+            recommendation=detailed_recommendation,  # Maintenant détaillé
+            norm_ref="EN 206"
+        ))
+    
     # ─── VALIDATIONS MODULAIRES ───
     alerts.extend(validate_water_binder_ratio(ratio_el, resistance))
     alerts.extend(validate_substitution_rate(ciment, laitier, cendres))
     alerts.extend(validate_durability(diffusion_cl, carbonatation, ratio_el))
     alerts.extend(validate_cement_content(ciment, liant_total))
-    
-    # ─── DÉTERMINATION CLASSE EXPOSITION ───
-    exposure_class = determine_exposure_class(ratio_el, resistance)
+
+    # ─── VALIDATION NORMATIVE STRICTE (EN 206) ───
+    alerts.extend(validate_en206_exposure_strict(
+        exposure_class=exposure_class,
+        ratio_el=ratio_el,
+        resistance=resistance,
+        liant_total=liant_total
+    ))
     
     # ─── DÉTERMINATION CLASSE RÉSISTANCE ───
     resistance_class = determine_resistance_class(resistance)
@@ -484,12 +601,20 @@ def validate_formulation(
     # ─── CALCUL SCORE CONFORMITÉ ───
     compliance_score = calculate_compliance_score(alerts)
     
+    # Ajuster le score avec l'analyse probabiliste si disponible
+    if hasattr(exposure_result, 'probabilities'):
+        # Bonus si la probabilité est élevée pour la classe gouvernante
+        gov_prob = exposure_result.probabilities.get(exposure_class, 0)
+        if gov_prob > 0.8:
+            compliance_score = min(100, compliance_score + 5)
+    
     # ─── VALIDITÉ GLOBALE ───
     is_valid = not any(a.severity == Severity.CRITICAL for a in alerts)
     
     logger.info(
         f"Validation terminée : {len(alerts)} alertes, "
-        f"Score={compliance_score:.0f}/100, Valide={is_valid}"
+        f"Score={compliance_score:.0f}/100, Valide={is_valid}, "
+        f"Classe={exposure_class}"
     )
     
     return ValidationReport(
@@ -500,19 +625,83 @@ def validate_formulation(
         compliance_score=compliance_score
     )
 
+# Fonction utilitaire pour l'analyse probabiliste
+def validate_formulation_probabilistic(
+    composition: Dict[str, float],
+    predictions_mean: Dict[str, float],
+    predictions_std: Dict[str, float],
+    confidence_level: float = 0.95
+) -> Dict:
+    """
+    Validation probabiliste pour contrôle qualité
+    
+    Args:
+        composition: Composition béton
+        predictions_mean: Moyennes des prédictions
+        predictions_std: Écarts-types des prédictions
+        confidence_level: Niveau de confiance
+        
+    Returns:
+        Analyse probabiliste complète
+    """
+    from .normative_engines import IndustrialEN206Engine
+    
+    engine = IndustrialEN206Engine(use_probabilistic=True)
+    
+    result = engine.determine_probabilistic(
+        ratio_el_mean=predictions_mean["Ratio_E_L"],
+        ratio_el_std=predictions_std["Ratio_E_L"],
+        resistance_mean=predictions_mean["Resistance"],
+        resistance_std=predictions_std["Resistance"],
+        diffusion_cl_mean=predictions_mean.get("Diffusion_Cl"),
+        diffusion_cl_std=predictions_std.get("Diffusion_Cl"),
+        carbonatation_mean=predictions_mean.get("Carbonatation"),
+        carbonatation_std=predictions_std.get("Carbonatation"),
+        confidence_level=confidence_level
+    )
+    
+    return {
+        "governing_class": result.governing_class,
+        "probabilities": result.probabilities,
+        "confidence_intervals": result.confidence_intervals,
+        "recommendations": result.recommendations,
+        "classes_satisfied": result.classes
+    }
 
-def determine_exposure_class(ratio_el: float, resistance: float) -> str:
-    """Détermine classe exposition recommandée selon EN 206"""
-    
-    # Parcourir classes exposition par ordre de sévérité décroissante
-    for class_name, specs in sorted(
-        EXPOSURE_CLASSES.items(), 
-        key=lambda x: x[1]["E_L_max"]
-    ):
-        if ratio_el <= specs["E_L_max"] and resistance >= specs["fc_min"]:
-            return class_name
-    
-    return "XC1"  # Par défaut (moins agressif)
+
+def determine_exposure_class(
+    ratio_el: float,
+    resistance: float,
+    diffusion_cl: float,
+    carbonatation: float
+) -> str:
+    """
+    Détermination réaliste classe exposition selon EN 206.
+    Prend en compte :
+    - Ratio E/L
+    - Résistance
+    - Diffusion chlorures
+    - Carbonatation
+    """
+
+    # ────────── MARITIME / CHLORURES ──────────
+    if diffusion_cl <= 5 and ratio_el <= 0.45:
+        return "XS3"  # Zone marnage
+    elif diffusion_cl <= 8 and ratio_el <= 0.50:
+        return "XS2"
+    elif diffusion_cl <= 12:
+        return "XD3"
+
+    # ────────── CARBONATATION ──────────
+    if carbonatation <= 8 and ratio_el <= 0.45:
+        return "XC4"
+    elif carbonatation <= 15 and ratio_el <= 0.55:
+        return "XC3"
+    elif carbonatation <= 25:
+        return "XC2"
+
+    # ────────── PAR DÉFAUT ──────────
+    return "XC1"
 
 
 def determine_resistance_class(resistance: float) -> str:
@@ -562,6 +751,7 @@ def calculate_compliance_score(alerts: List[ValidationAlert]) -> float:
 
 __all__ = [
     "validate_formulation",
+    "validate_formulation_probabilistic", 
     "ValidationReport",
     "ValidationAlert",
     "Severity",

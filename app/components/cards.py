@@ -26,12 +26,26 @@ def metric_card(
     icon: str = "📊",
     help_text: Optional[str] = None,
     quality_grade: Optional[str] = None,
-    key: Optional[str] = None  # Ajout optionnel pour unicité
+    key: Optional[str] = None
 ) -> None:
     """
-    Carte métrique stylisée – version moderne et stable (st.html + structure claire)
+    Carte métrique stylisée – version corrigée pour rétrocompatibilité.
+    
+    Gère les deux signatures:
+    - Nouvelle: metric_card(title, value, unit, delta, icon, help_text, quality_grade)
+    - Ancienne: metric_card(title, value, unit, icon, quality_grade) ← COMPATIBLE
     """
-    # Déterminer couleur et emoji selon grade
+    
+    # Détection ordre arguments
+    # Si delta est une string (emoji), les arguments sont dans l'ancien ordre
+    if isinstance(delta, str):
+        # Ancien ordre: title, value, unit, icon, quality_grade
+        # delta contient l'icon, icon contient quality_grade
+        quality_grade = icon if isinstance(icon, str) else quality_grade
+        icon = delta
+        delta = None  # Pas de delta dans ancien format
+    
+    # Détermine la couleur et emoji selon grade
     if quality_grade and quality_grade in QUALITY_THRESHOLDS:
         card_color = COLOR_PALETTE.get(QUALITY_THRESHOLDS[quality_grade]["color"], COLOR_PALETTE["primary"])
         emoji = STATUS_EMOJI.get(quality_grade, "")
@@ -39,17 +53,17 @@ def metric_card(
         card_color = COLOR_PALETTE["primary"]
         emoji = ""
 
-    # Formatage propre de la valeur
+    # Formatage valeur
     value_str = f"{value:,.1f}" if abs(value) >= 1000 else f"{value:.1f}" if abs(value) >= 10 else f"{value:.2f}"
 
-    # Delta (optionnel)
+    # Delta VÉRIFICATION TYPE
     delta_html = ""
-    if delta is not None:
+    if delta is not None and isinstance(delta, (int, float)):
         delta_color = COLOR_PALETTE["success"] if delta >= 0 else COLOR_PALETTE["danger"]
         delta_symbol = "↑" if delta >= 0 else "↓"
         delta_html = f'<span style="color:{delta_color};font-size:0.9rem;margin-left:0.5rem;">{delta_symbol} {abs(delta):.1f}</span>'
 
-    # HTML pur – sans markdown mélangé
+    # HTML (reste identique)
     card_html = f"""
     <div class="custom-metric-card" style="
         background: linear-gradient(135deg, {card_color}15 0%, {card_color}05 100%);
@@ -95,10 +109,8 @@ def metric_card(
     </style>
     """
 
-    # Injection via st.html – beaucoup plus fiable
     st.html(card_html)
 
-    # Help text dans expander
     if help_text:
         with st.expander("Détails", expanded=False):
             st.caption(help_text)

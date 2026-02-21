@@ -1,17 +1,17 @@
 """
 ═══════════════════════════════════════════════════════════════════════════════
-PAGE: Comparateur - Benchmark de Formulations
-Fichier: app/pages/3_Comparateur.py
+PAGE: Comparateur - Benchmark de Formulations + CO₂
+Fichier: pages/3_Comparateur.py
 Auteur: Stage R&D - IMT Nord Europe
-Version: 1.0.0
+Version: 1.1.0 - AVEC MODULE CO₂
 ═══════════════════════════════════════════════════════════════════════════════
 
-Fonctionnalités:
-- Chargement jusqu'à 10 formulations
-- Tableau comparatif multi-critères
-- Coordonnées parallèles
-- Graphiques radar
-- Export CSV/Excel
+NOUVEAUTÉS v1.1.0:
+✅ Calcul empreinte CO₂ pour chaque formulation
+✅ Colonne CO₂ dans tableau comparatif
+✅ Classement par empreinte carbone
+✅ Graphique comparatif CO₂
+✅ Export avec données environnementales
 """
 
 import streamlit as st
@@ -22,18 +22,18 @@ import plotly.express as px
 from datetime import datetime
 
 from config.settings import APP_SETTINGS
-from config.constants import COLOR_PALETTE, PRESET_FORMULATIONS, LABELS_MAP
+from config.constants import COLOR_PALETTE, PRESET_FORMULATIONS
 from app.styles.theme import apply_custom_theme
 from app.components.sidebar import render_sidebar
 from app.components.forms import render_formulation_input
 from app.components.cards import info_box
 from app.components.charts import plot_parallel_coordinates, plot_performance_radar
 from app.core.predictor import predict_concrete_properties
-from app.core.analyzer import ConcreteAnalyzer
+
+# ✅ IMPORT MODULE CO₂
+from app.core.co2_calculator import CO2Calculator, get_environmental_grade
 
 from app.core.session_manager import initialize_session
-
-# Charge tout ce qu'il faut
 initialize_session()
 
 logger = logging.getLogger(__name__)
@@ -65,10 +65,10 @@ if 'comparison_formulations' not in st.session_state:
 st.markdown(
     f"""
     <h1 style="color: {COLOR_PALETTE['primary']}; border-bottom: 3px solid {COLOR_PALETTE['accent']}; padding-bottom: 0.5rem;">
-        ⚖️ Comparateur de Formulations
+        ⚖️ Comparateur de Formulations + Empreinte CO₂
     </h1>
     <p style="font-size: 1.1rem; color: {COLOR_PALETTE['secondary']}; margin-top: 0.5rem;">
-        Comparez jusqu'à 10 formulations côte à côte pour identifier la plus adaptée.
+        Comparez jusqu'à 10 formulations sur performance + impact environnemental.
     </p>
     """,
     unsafe_allow_html=True
@@ -77,21 +77,34 @@ st.markdown(
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# GESTION DES FORMULATIONS
+# ✅ NOUVEAU : Sélection type de ciment global
 # ═══════════════════════════════════════════════════════════════════════════════
 
-col_manage1, col_manage2, col_manage3 = st.columns([2, 1, 1])
+col_cement, col_manage1, col_manage2, col_manage3 = st.columns([2, 2, 1, 1])
+
+with col_cement:
+    st.markdown("### 🏭 Type de Ciment (Global)")
+    
+    from config.co2_database import CEMENT_CO2_KG_PER_TONNE
+    cement_types = list(CEMENT_CO2_KG_PER_TONNE.keys())
+    
+    global_cement_type = st.selectbox(
+        "Appliquer à toutes les formulations",
+        options=cement_types,
+        index=0,
+        help="Type de ciment utilisé pour le calcul CO₂"
+    )
 
 with col_manage1:
-    st.markdown(f"**Formulations chargées** : {len(st.session_state['comparison_formulations'])} / 10")
+    st.markdown(f"**Formulations** : {len(st.session_state['comparison_formulations'])} / 10")
 
 with col_manage2:
-    if st.button("🗑️ Tout Effacer", type="secondary", width="stretch"):
+    if st.button("🗑️ Effacer", type="secondary", width='stretch'):
         st.session_state['comparison_formulations'] = []
         st.rerun()
 
 with col_manage3:
-    if st.button("📊 Charger Toutes Présets", width="stretch"):
+    if st.button("📊 Présets", width='stretch'):
         if len(st.session_state['comparison_formulations']) + len(PRESET_FORMULATIONS) <= 10:
             for name, data in PRESET_FORMULATIONS.items():
                 composition = {k: v for k, v in data.items() if k in ['Ciment', 'Laitier', 'CendresVolantes', 'Eau', 'Superplastifiant', 'GravilonsGros', 'SableFin', 'Age']}
@@ -101,7 +114,7 @@ with col_manage3:
                 })
             st.rerun()
         else:
-            st.warning("⚠️ Limite de 10 formulations atteinte")
+            st.warning("⚠️ Limite 10 atteinte")
 
 st.markdown("---")
 
@@ -119,14 +132,9 @@ if len(st.session_state['comparison_formulations']) < 10:
             st.markdown("#### Formulations Prédéfinies")
             
             preset_names = list(PRESET_FORMULATIONS.keys())
+            selected_preset_add = st.selectbox("Sélectionner", options=preset_names, key="preset_add")
             
-            selected_preset_add = st.selectbox(
-                "Sélectionner",
-                options=preset_names,
-                key="preset_add_selector"
-            )
-            
-            if st.button("➕ Ajouter cette Formulation", key="add_preset", type="primary"):
+            if st.button("➕ Ajouter", key="add_preset", type="primary"):
                 preset_data = PRESET_FORMULATIONS[selected_preset_add]
                 composition = {k: v for k, v in preset_data.items() if k in ['Ciment', 'Laitier', 'CendresVolantes', 'Eau', 'Superplastifiant', 'GravilonsGros', 'SableFin', 'Age']}
                 
@@ -141,17 +149,8 @@ if len(st.session_state['comparison_formulations']) < 10:
         with tab_custom:
             st.markdown("#### Formulation Personnalisée")
             
-            custom_name = st.text_input(
-                "Nom",
-                value=f"Formulation_{len(st.session_state['comparison_formulations']) + 1}",
-                key="custom_name_input"
-            )
-            
-            custom_composition = render_formulation_input(
-                key_suffix="comparator_custom",
-                layout="compact",
-                show_presets=False
-            )
+            custom_name = st.text_input("Nom", value=f"Formulation_{len(st.session_state['comparison_formulations']) + 1}", key="custom_name")
+            custom_composition = render_formulation_input(key_suffix="comparator_custom", layout="compact", show_presets=False)
             
             if st.button("➕ Ajouter", key="add_custom", type="primary"):
                 st.session_state['comparison_formulations'].append({
@@ -167,7 +166,7 @@ if len(st.session_state['comparison_formulations']) < 10:
             
             db_manager = st.session_state.get('db_manager')
             
-            if db_manager:
+            if db_manager and db_manager.is_connected:
                 recent = db_manager.get_recent_predictions(limit=10)
                 
                 if recent:
@@ -180,7 +179,6 @@ if len(st.session_state['comparison_formulations']) < 10:
                         
                         with col_h2:
                             if st.button("➕", key=f"add_history_{i}"):
-                                # Reconstruire composition
                                 composition_hist = {
                                     'Ciment': record.get('ciment', 0),
                                     'Eau': record.get('eau', 0),
@@ -188,8 +186,8 @@ if len(st.session_state['comparison_formulations']) < 10:
                                     'GravilonsGros': record.get('gravier', 0),
                                     'Superplastifiant': record.get('adjuvants', 0),
                                     'Age': record.get('age', 28),
-                                    'Laitier': 0,
-                                    'CendresVolantes': 0
+                                    'Laitier': record.get('laitier', 0),
+                                    'CendresVolantes': record.get('cendres', 0)
                                 }
                                 
                                 st.session_state['comparison_formulations'].append({
@@ -198,12 +196,12 @@ if len(st.session_state['comparison_formulations']) < 10:
                                 })
                                 st.rerun()
                 else:
-                    st.info("Aucun historique disponible")
+                    st.info("Aucun historique")
             else:
-                st.warning("Base de données non connectée")
+                st.warning("DB non connectée")
 
 else:
-    st.info("✋ Limite de 10 formulations atteinte. Supprimez-en pour ajouter de nouvelles.")
+    st.info("✋ Limite 10 atteinte")
 
 st.markdown("---")
 
@@ -213,20 +211,26 @@ st.markdown("---")
 
 if len(st.session_state['comparison_formulations']) >= 2:
     
-    if st.button("🚀 Comparer les Formulations", type="primary", width="stretch"):
+    if st.button("🚀 Comparer les Formulations + CO₂", type="primary", width='stretch'):
         
-        with st.spinner("🔄 Calcul des prédictions..."):
+        with st.spinner("🔄 Calcul des prédictions + empreintes CO₂..."):
             try:
                 model = st.session_state.get('model')
                 features = st.session_state.get('features')
                 
-                # Prédire pour chaque formulation
+                # ✅ Initialiser calculateur CO₂
+                co2_calc = CO2Calculator()
+                
                 results = []
                 
-                for formulation in st.session_state['comparison_formulations']:
+                # Barre de progression
+                progress_bar = st.progress(0)
+                
+                for idx, formulation in enumerate(st.session_state['comparison_formulations']):
                     name = formulation['name']
                     composition = formulation['composition']
                     
+                    # 1. Prédictions ML
                     predictions = predict_concrete_properties(
                         composition=composition,
                         model=model,
@@ -234,18 +238,28 @@ if len(st.session_state['comparison_formulations']) >= 2:
                         validate=False
                     )
                     
-                    # Combiner composition + prédictions
+                    # ✅ 2. Calcul CO₂
+                    co2_result = co2_calc.calculate(composition, global_cement_type)
+                    
+                    # Combiner tout
                     result = {
                         'Nom': name,
                         **composition,
-                        **predictions
+                        **predictions,
+                        # ✅ Ajouter données CO₂
+                        'CO2_Total': co2_result.co2_total_kg_m3,
+                        'CO2_Ciment': co2_result.co2_ciment,
+                        'CO2_Classe': get_environmental_grade(co2_result.co2_total_kg_m3)[0]
                     }
                     
                     results.append(result)
+                    
+                    # Mise à jour progression
+                    progress_bar.progress((idx + 1) / len(st.session_state['comparison_formulations']))
                 
                 df_comparison = pd.DataFrame(results)
                 
-                st.success(f"✅ {len(results)} formulations comparées")
+                st.success(f"✅ {len(results)} formulations comparées (ML + CO₂)")
                 
                 # ───────────────────────────────────────────────────────
                 # TABLEAU COMPARATIF
@@ -253,42 +267,46 @@ if len(st.session_state['comparison_formulations']) >= 2:
                 
                 st.markdown("### 📊 Tableau Comparatif")
                 
-                # Colonnes à afficher
+                # ✅ Colonnes avec CO₂
                 display_cols = [
                     'Nom',
                     'Ciment', 'Laitier', 'CendresVolantes', 'Eau',
                     'Ratio_E_L', 'Liant_Total',
-                    'Resistance', 'Diffusion_Cl', 'Carbonatation'
+                    'Resistance', 'Diffusion_Cl', 'Carbonatation',
+                    'CO2_Total', 'CO2_Classe'  # ✅ NOUVEAU
                 ]
                 
                 df_display = df_comparison[[col for col in display_cols if col in df_comparison.columns]]
                 
-                # Renommer pour affichage
+                # Renommer
                 rename_map = {
                     'Resistance': 'Résistance (MPa)',
                     'Diffusion_Cl': 'Diffusion Cl⁻',
                     'Carbonatation': 'Carbonatation (mm)',
                     'Ratio_E_L': 'Ratio E/L',
-                    'Liant_Total': 'Liant Total (kg)'
+                    'Liant_Total': 'Liant (kg)',
+                    'CO2_Total': 'CO₂ (kg/m³)',  # ✅ NOUVEAU
+                    'CO2_Classe': 'Classe CO₂'    # ✅ NOUVEAU
                 }
                 
                 df_display = df_display.rename(columns=rename_map)
                 
-                # Highlight meilleurs/pires
+                # ✅ Highlight meilleurs + CO₂ min
                 st.dataframe(
                     df_display.style.highlight_max(
                         subset=['Résistance (MPa)'],
                         color='lightgreen'
                     ).highlight_min(
-                        subset=['Diffusion Cl⁻', 'Carbonatation (mm)'],
+                        subset=['Diffusion Cl⁻', 'Carbonatation (mm)', 'CO₂ (kg/m³)'],  # ✅ CO₂ min = bon
                         color='lightgreen'
                     ).format({
                         'Résistance (MPa)': '{:.2f}',
                         'Diffusion Cl⁻': '{:.2f}',
                         'Carbonatation (mm)': '{:.2f}',
-                        'Ratio E/L': '{:.3f}'
+                        'Ratio E/L': '{:.3f}',
+                        'CO₂ (kg/m³)': '{:.1f}'  # ✅ NOUVEAU
                     }),
-                    width="stretch",
+                    width='stretch',
                     height=400
                 )
                 
@@ -300,68 +318,47 @@ if len(st.session_state['comparison_formulations']) >= 2:
                 
                 st.markdown("### 📈 Visualisations")
                 
-                tab_parallel, tab_bars, tab_radar = st.tabs([
+                # ✅ Nouveau tab CO₂
+                tab_parallel, tab_bars, tab_radar, tab_co2 = st.tabs([
                     "Coordonnées Parallèles",
                     "Barres Comparatives",
-                    "Radars"
+                    "Radars",
+                    "🌍 Impact CO₂"  # ✅ NOUVEAU
                 ])
                 
                 with tab_parallel:
                     fig_parallel = plot_parallel_coordinates(df_comparison, color_by='Resistance')
-                    st.plotly_chart(fig_parallel, width="stretch")
+                    st.plotly_chart(fig_parallel, width='stretch')
                 
                 with tab_bars:
-                    # Graphiques en barres pour chaque cible
-                    col_b1, col_b2, col_b3 = st.columns(3)
+                    # 4 graphiques (ajout CO₂)
+                    col_b1, col_b2, col_b3, col_b4 = st.columns(4)
                     
                     with col_b1:
-                        fig_r = go.Figure(data=[
-                            go.Bar(
-                                x=df_comparison['Nom'],
-                                y=df_comparison['Resistance'],
-                                marker_color=COLOR_PALETTE['primary']
-                            )
-                        ])
-                        fig_r.update_layout(
-                            title="Résistance (MPa)",
-                            height=350
-                        )
-                        st.plotly_chart(fig_r, width="stretch")
+                        fig_r = go.Figure(data=[go.Bar(x=df_comparison['Nom'], y=df_comparison['Resistance'], marker_color=COLOR_PALETTE['primary'])])
+                        fig_r.update_layout(title="Résistance (MPa)", height=300, showlegend=False)
+                        st.plotly_chart(fig_r, width='stretch')
                     
                     with col_b2:
-                        fig_d = go.Figure(data=[
-                            go.Bar(
-                                x=df_comparison['Nom'],
-                                y=df_comparison['Diffusion_Cl'],
-                                marker_color=COLOR_PALETTE['success']
-                            )
-                        ])
-                        fig_d.update_layout(
-                            title="Diffusion Cl⁻",
-                            height=350
-                        )
-                        st.plotly_chart(fig_d, width="stretch")
+                        fig_d = go.Figure(data=[go.Bar(x=df_comparison['Nom'], y=df_comparison['Diffusion_Cl'], marker_color=COLOR_PALETTE['success'])])
+                        fig_d.update_layout(title="Diffusion Cl⁻", height=300, showlegend=False)
+                        st.plotly_chart(fig_d, width='stretch')
                     
                     with col_b3:
-                        fig_c = go.Figure(data=[
-                            go.Bar(
-                                x=df_comparison['Nom'],
-                                y=df_comparison['Carbonatation'],
-                                marker_color=COLOR_PALETTE['warning']
-                            )
-                        ])
-                        fig_c.update_layout(
-                            title="Carbonatation (mm)",
-                            height=350
-                        )
-                        st.plotly_chart(fig_c, width="stretch")
+                        fig_c = go.Figure(data=[go.Bar(x=df_comparison['Nom'], y=df_comparison['Carbonatation'], marker_color=COLOR_PALETTE['warning'])])
+                        fig_c.update_layout(title="Carbonatation (mm)", height=300, showlegend=False)
+                        st.plotly_chart(fig_c, width='stretch')
+                    
+                    # ✅ Graphique CO₂
+                    with col_b4:
+                        fig_co2_bar = go.Figure(data=[go.Bar(x=df_comparison['Nom'], y=df_comparison['CO2_Total'], marker_color='#2ecc71')])
+                        fig_co2_bar.update_layout(title="CO₂ (kg/m³)", height=300, showlegend=False)
+                        st.plotly_chart(fig_co2_bar, width='stretch')
                 
                 with tab_radar:
-                    # Afficher radars pour top 3
                     st.markdown("#### Top 3 Formulations (Résistance)")
                     
                     df_sorted = df_comparison.sort_values('Resistance', ascending=False).head(3)
-                    
                     cols_radar = st.columns(3)
                     
                     for i, (idx, row) in enumerate(df_sorted.iterrows()):
@@ -373,22 +370,76 @@ if len(st.session_state['comparison_formulations']) >= 2:
                                 'Ratio_E_L': row['Ratio_E_L']
                             }
                             
-                            fig_radar = plot_performance_radar(
-                                predictions=predictions_radar,
-                                name=row['Nom']
-                            )
-                            
-                            st.plotly_chart(fig_radar, width="stretch")
+                            fig_radar = plot_performance_radar(predictions_radar, name=row['Nom'])
+                            st.plotly_chart(fig_radar, width='stretch')
+                
+                # ✅ NOUVEAU TAB CO₂
+                with tab_co2:
+                    st.markdown("#### Comparaison Empreinte Carbone")
+                    
+                    # Graphique comparatif CO₂
+                    fig_co2_comp = go.Figure()
+                    
+                    # Trier par CO₂
+                    df_co2_sorted = df_comparison.sort_values('CO2_Total')
+                    
+                    # Colorier selon classe
+                    colors = []
+                    for co2 in df_co2_sorted['CO2_Total']:
+                        if co2 < 200:
+                            colors.append('#2ecc71')  # Vert
+                        elif co2 < 280:
+                            colors.append('#27ae60')
+                        elif co2 < 350:
+                            colors.append('#f39c12')  # Orange
+                        else:
+                            colors.append('#e74c3c')  # Rouge
+                    
+                    fig_co2_comp.add_trace(go.Bar(
+                        x=df_co2_sorted['Nom'],
+                        y=df_co2_sorted['CO2_Total'],
+                        marker_color=colors,
+                        text=df_co2_sorted['CO2_Total'].round(1),
+                        textposition='outside'
+                    ))
+                    
+                    fig_co2_comp.update_layout(
+                        title=f"Empreinte CO₂ - Ciment: {global_cement_type}",
+                        xaxis_title="Formulation",
+                        yaxis_title="kg CO₂/m³",
+                        height=400,
+                        showlegend=False
+                    )
+                    
+                    # Lignes de classe
+                    fig_co2_comp.add_hline(y=200, line_dash="dash", line_color="green", annotation_text="Très Faible")
+                    fig_co2_comp.add_hline(y=280, line_dash="dash", line_color="orange", annotation_text="Moyen")
+                    fig_co2_comp.add_hline(y=350, line_dash="dash", line_color="red", annotation_text="Élevé")
+                    
+                    st.plotly_chart(fig_co2_comp, width='stretch')
+                    
+                    # Statistiques CO₂
+                    col_co2_1, col_co2_2, col_co2_3 = st.columns(3)
+                    
+                    with col_co2_1:
+                        st.metric("CO₂ Min", f"{df_comparison['CO2_Total'].min():.1f} kg/m³")
+                    
+                    with col_co2_2:
+                        st.metric("CO₂ Moyen", f"{df_comparison['CO2_Total'].mean():.1f} kg/m³")
+                    
+                    with col_co2_3:
+                        st.metric("CO₂ Max", f"{df_comparison['CO2_Total'].max():.1f} kg/m³")
                 
                 st.markdown("---")
                 
                 # ───────────────────────────────────────────────────────
-                # CLASSEMENT
+                # CLASSEMENTS
                 # ───────────────────────────────────────────────────────
                 
                 st.markdown("### 🏆 Classements")
                 
-                col_rank1, col_rank2, col_rank3 = st.columns(3)
+                # ✅ 4 classements (ajout CO₂)
+                col_rank1, col_rank2, col_rank3, col_rank4 = st.columns(4)
                 
                 with col_rank1:
                     st.markdown("#### 💪 Résistance")
@@ -411,6 +462,14 @@ if len(st.session_state['comparison_formulations']) >= 2:
                         emoji = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else ""))
                         st.markdown(f"{emoji} **{i}.** {row.Nom} - {row.Carbonatation:.1f} mm")
                 
+                # ✅ NOUVEAU : Classement CO₂
+                with col_rank4:
+                    st.markdown("#### 🌍 Impact CO₂")
+                    df_co2_rank = df_comparison[['Nom', 'CO2_Total']].sort_values('CO2_Total', ascending=True)
+                    for i, row in enumerate(df_co2_rank.itertuples(), 1):
+                        emoji = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else ""))
+                        st.markdown(f"{emoji} **{i}.** {row.Nom} - {row.CO2_Total:.1f} kg")
+                
                 st.markdown("---")
                 
                 # ───────────────────────────────────────────────────────
@@ -426,13 +485,12 @@ if len(st.session_state['comparison_formulations']) >= 2:
                     st.download_button(
                         "📥 Télécharger CSV",
                         data=csv,
-                        file_name=f"comparaison_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        file_name=f"comparaison_co2_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                         mime="text/csv",
-                        width="stretch"
+                        width='stretch'
                     )
                 
                 with col_export2:
-                    # Excel (nécessite openpyxl)
                     from io import BytesIO
                     buffer = BytesIO()
                     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -441,9 +499,9 @@ if len(st.session_state['comparison_formulations']) >= 2:
                     st.download_button(
                         "📥 Télécharger Excel",
                         data=buffer.getvalue(),
-                        file_name=f"comparaison_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        file_name=f"comparaison_co2_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        width="stretch"
+                        width='stretch'
                     )
             
             except Exception as e:
@@ -451,22 +509,19 @@ if len(st.session_state['comparison_formulations']) >= 2:
                 st.error(f"❌ Erreur : {e}")
 
 elif len(st.session_state['comparison_formulations']) == 1:
-    st.info("ℹ️ Ajoutez au moins une autre formulation pour effectuer une comparaison.")
+    st.info("ℹ️ Ajoutez au moins une autre formulation")
 
 else:
     info_box(
         "Mode d'emploi",
         """
-        1. **Ajoutez** 2 à 10 formulations (prédéfinies, personnalisées ou depuis l'historique)
-        2. **Cliquez** sur "🚀 Comparer les Formulations"
-        3. **Analysez** le tableau comparatif et les graphiques
-        4. **Exportez** les résultats en CSV ou Excel
+        1. **Choisissez** le type de ciment (CEM I, CEM III/B...)
+        2. **Ajoutez** 2 à 10 formulations
+        3. **Cliquez** sur "🚀 Comparer"
+        4. **Analysez** performance + empreinte CO₂
+        5. **Exportez** les résultats
         
-        Les formulations seront comparées sur :
-        - Résistance en compression
-        - Diffusion des chlorures
-        - Profondeur de carbonatation
-        - Ratio E/L et liant total
+        **Nouveau** : Comparaison environnementale automatique
         """,
         icon="ℹ️",
         color="info"
@@ -486,11 +541,7 @@ if st.session_state['comparison_formulations']:
         with col_form1:
             st.markdown(f"**{i+1}. {formulation['name']}**")
             comp = formulation['composition']
-            st.caption(
-                f"Ciment: {comp.get('Ciment', 0):.0f} | "
-                f"Eau: {comp.get('Eau', 0):.0f} | "
-                f"Age: {comp.get('Age', 0):.0f}j"
-            )
+            st.caption(f"Ciment: {comp.get('Ciment', 0):.0f} | Eau: {comp.get('Eau', 0):.0f} | Age: {comp.get('Age', 0):.0f}j")
         
         with col_form2:
             if st.button("🗑️", key=f"remove_{i}"):
@@ -502,4 +553,4 @@ if st.session_state['comparison_formulations']:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 st.markdown("---")
-st.caption("💡 **Conseil** : Utilisez les coordonnées parallèles pour identifier visuellement les tendances")
+st.caption("🌍 **Impact CO₂** calculé selon NF EN 15804 | 💡 CEM III/B = Réduction ~60% vs CEM I")
