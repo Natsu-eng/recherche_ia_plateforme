@@ -145,7 +145,7 @@ class CO2Calculator:
             )
             
             logger.info(
-                f"Empreinte calculée: {co2_total:.1f} kg CO₂/m³ "
+                f"Empreinte calculée: {co2_total:.1f} kg CO₂/m³ avec "
                 f"(Ciment {cement_type})"
             )
             
@@ -171,7 +171,7 @@ class CO2Calculator:
             raise
         
         except Exception as e:
-            logger.error(f"[CO2] Calcul error: {e}", exc_info=True)
+            logger.error(f"Calcul error: {e}", exc_info=True)
             raise RuntimeError(f"Erreur calcul CO₂: {e}")
     
     def _validate_formulation(self, formulation: Dict[str, float]) -> None:
@@ -201,7 +201,7 @@ class CO2Calculator:
             raise ValueError(f"Dosage ciment invalide: {ciment} kg/m³")
         
         if ciment > 600:
-            logger.warning(f"[CO2] Dosage ciment élevé: {ciment} kg/m³")
+            logger.warning(f"Dosage ciment élevé: {ciment} kg/m³")
     
     def compare_cements(
         self,
@@ -227,7 +227,7 @@ class CO2Calculator:
             try:
                 results[cement_type] = self.calculate(formulation, cement_type)
             except Exception as e:
-                logger.error(f"[CO2] Erreur comparaison {cement_type}: {e}")
+                logger.error(f"Erreur comparaison {cement_type}: {e}")
         
         return results
     

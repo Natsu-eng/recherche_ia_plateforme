@@ -26,6 +26,7 @@ CO2_FACTORS_KG_PER_TONNE = {
     'Clinker': 806.0,              # Source: ATILH 2024
     'Laitier': 45.0,               # Laitier de haut-fourneau
     'CendresVolantes': 10.0,       # Cendres volantes
+    'Metakaolin': 260.0,           # Métakaolin (argile calcinée)
     'Pouzzolane': 2.0,             # Pouzzolane naturelle
     'ArgileCalcinee': 260.0,       # Argile calcinée (Metakaolin)
     'Calcaire': 2.5,               # Filler calcaire

@@ -287,7 +287,7 @@ class DatabaseManager:
             # 1. EXTRACTION & VALIDATION DONNÉES
             # ═══════════════════════════════════════════════════════════
             
-            logger.debug("[SAVE] 1/6 Extraction donnees...")
+            logger.debug("Extraction donnees...")
             
             ciment = float(formulation.get('Ciment', 0.0))
             eau = float(formulation.get('Eau', 0.0))
@@ -295,6 +295,7 @@ class DatabaseManager:
             gravier = float(formulation.get('GravilonsGros', 0.0))
             laitier = float(formulation.get('Laitier', 0.0))
             cendres = float(formulation.get('CendresVolantes', 0.0))
+            metakaolin = float(formulation.get('Metakaolin', 0.0))
             adjuvants = float(formulation.get('Superplastifiant', 0.0))
             age = int(formulation.get('Age', 28))
             
@@ -374,9 +375,10 @@ class DatabaseManager:
                     diffusion_cl_predite,
                     carbonatation_predite,
                     laitier,
-                    cendres
+                    cendres,
+                    metakaolin
                 ) VALUES (
-                    %s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 RETURNING id, horodatage;
             """
@@ -399,7 +401,8 @@ class DatabaseManager:
                 diffusion,
                 carbonatation,
                 laitier,
-                cendres
+                cendres,
+                metakaolin
             )
             
             logger.debug(f"[SAVE] Parametres prepares: {len(params)} valeurs")

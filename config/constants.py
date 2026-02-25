@@ -50,6 +50,16 @@ BOUNDS: Dict[str, Dict[str, Any]] = {
         "description": "Cendres volantes siliceuses (addition type II)",
         "norme": "Taux de substitution < 55% (NF EN 450-1)"
     },
+
+    "Metakaolin": {
+        "min": 0,
+        "max": 150,
+        "default": 0,
+        "step": 5,
+        "unit": "kg/m³",
+        "description": "Métakaolin (argile calcinée) - Améliore résistance et durabilité",
+        "norme": "NF P 18-513 - Addition calcinée"
+    },
     
     # ─── EAU & ADJUVANTS ───
     "Eau": {
@@ -114,6 +124,7 @@ LABELS_MAP: Dict[str, str] = {
     "Ciment": "Ciment CEM I/II",
     "Laitier": "Laitier de Haut-Fourneau",
     "CendresVolantes": "Cendres Volantes",
+    "Metakaolin": "Métakaolin",
     "Eau": "Eau de Gâchage",
     "Superplastifiant": "Superplastifiant",
     "GravilonsGros": "Gravillons 4/20",

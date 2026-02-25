@@ -96,7 +96,7 @@ def render_formulation_input(
     
     # Regroupement constituants
     groups = {
-        "Liants": ['Ciment', 'Laitier', 'CendresVolantes'],
+        "Liants": ['Ciment', 'Laitier', 'CendresVolantes', 'Metakaolin'],
         "Eau & Adjuvants": ['Eau', 'Superplastifiant'],
         "Granulats": ['GravilonsGros', 'SableFin'],
         "Maturation": ['Age']

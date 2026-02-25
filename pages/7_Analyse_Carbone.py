@@ -52,6 +52,9 @@ st.set_page_config(
 apply_custom_theme(st.session_state.get('app_theme', 'Clair'))
 render_sidebar(db_manager=st.session_state.get('db_manager'))
 
+from app.components.navbar import render_navbar
+render_navbar(current_page="Analyse Carbone")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ✅ FONCTION AJUSTEMENT COMPOSITION
 # ═══════════════════════════════════════════════════════════════════════════════

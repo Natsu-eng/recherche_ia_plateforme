@@ -30,7 +30,7 @@ from app.components.cards import info_box
 from app.components.charts import plot_parallel_coordinates, plot_performance_radar
 from app.core.predictor import predict_concrete_properties
 
-# ✅ IMPORT MODULE CO₂
+# IMPORT MODULE CO₂
 from app.core.co2_calculator import CO2Calculator, get_environmental_grade
 
 from app.core.session_manager import initialize_session
@@ -50,6 +50,9 @@ st.set_page_config(
 
 apply_custom_theme(st.session_state.get('app_theme', 'Clair'))
 render_sidebar(db_manager=st.session_state.get('db_manager'))
+
+from app.components.navbar import render_navbar
+render_navbar(current_page="Comparateur")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INITIALISATION SESSION STATE
@@ -77,7 +80,7 @@ st.markdown(
 st.markdown("---")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ✅ NOUVEAU : Sélection type de ciment global
+# NOUVEAU : Sélection type de ciment global
 # ═══════════════════════════════════════════════════════════════════════════════
 
 col_cement, col_manage1, col_manage2, col_manage3 = st.columns([2, 2, 1, 1])
@@ -142,7 +145,7 @@ if len(st.session_state['comparison_formulations']) < 10:
                     'name': selected_preset_add,
                     'composition': composition
                 })
-                st.success(f"✅ {selected_preset_add} ajoutée")
+                st.success(f"{selected_preset_add} ajoutée")
                 st.rerun()
         
         # ─── TAB CUSTOM ───
@@ -157,7 +160,7 @@ if len(st.session_state['comparison_formulations']) < 10:
                     'name': custom_name,
                     'composition': custom_composition
                 })
-                st.success(f"✅ {custom_name} ajoutée")
+                st.success(f"{custom_name} ajoutée")
                 st.rerun()
         
         # ─── TAB HISTORY ───
@@ -187,7 +190,8 @@ if len(st.session_state['comparison_formulations']) < 10:
                                     'Superplastifiant': record.get('adjuvants', 0),
                                     'Age': record.get('age', 28),
                                     'Laitier': record.get('laitier', 0),
-                                    'CendresVolantes': record.get('cendres', 0)
+                                    'CendresVolantes': record.get('cendres', 0),
+                                    'Metakaolin': record.get('metakaolin', 0)
                                 }
                                 
                                 st.session_state['comparison_formulations'].append({
@@ -218,7 +222,7 @@ if len(st.session_state['comparison_formulations']) >= 2:
                 model = st.session_state.get('model')
                 features = st.session_state.get('features')
                 
-                # ✅ Initialiser calculateur CO₂
+                # Initialiser calculateur CO₂
                 co2_calc = CO2Calculator()
                 
                 results = []
@@ -230,15 +234,25 @@ if len(st.session_state['comparison_formulations']) >= 2:
                     name = formulation['name']
                     composition = formulation['composition']
                     
-                    # 1. Prédictions ML
-                    predictions = predict_concrete_properties(
-                        composition=composition,
-                        model=model,
-                        feature_list=features,
-                        validate=False
-                    )
+                    # 1. Prédictions ML (avec correcteur MK si applicable)
+                    if composition.get('Metakaolin', 0) > 0 and st.session_state.get('mk_corrector'):
+                        from app.core.predictor import predict_with_mk
+                        predictions = predict_with_mk(
+                            composition=composition,
+                            model=model,
+                            feature_list=features,
+                            mk_corrector=st.session_state['mk_corrector'],
+                            validate=False
+                        )
+                    else:
+                        predictions = predict_concrete_properties(
+                            composition=composition,
+                            model=model,
+                            feature_list=features,
+                            validate=False
+                        )
                     
-                    # ✅ 2. Calcul CO₂
+                    # 2. Calcul CO₂
                     co2_result = co2_calc.calculate(composition, global_cement_type)
                     
                     # Combiner tout
@@ -246,7 +260,7 @@ if len(st.session_state['comparison_formulations']) >= 2:
                         'Nom': name,
                         **composition,
                         **predictions,
-                        # ✅ Ajouter données CO₂
+                        # CO₂ (ajout au résultat)
                         'CO2_Total': co2_result.co2_total_kg_m3,
                         'CO2_Ciment': co2_result.co2_ciment,
                         'CO2_Classe': get_environmental_grade(co2_result.co2_total_kg_m3)[0]
@@ -259,7 +273,7 @@ if len(st.session_state['comparison_formulations']) >= 2:
                 
                 df_comparison = pd.DataFrame(results)
                 
-                st.success(f"✅ {len(results)} formulations comparées (ML + CO₂)")
+                st.success(f"{len(results)} formulations comparées (ML + CO₂)")
                 
                 # ───────────────────────────────────────────────────────
                 # TABLEAU COMPARATIF
@@ -267,13 +281,13 @@ if len(st.session_state['comparison_formulations']) >= 2:
                 
                 st.markdown("### 📊 Tableau Comparatif")
                 
-                # ✅ Colonnes avec CO₂
+                # Colonnes avec CO₂
                 display_cols = [
                     'Nom',
                     'Ciment', 'Laitier', 'CendresVolantes', 'Eau',
                     'Ratio_E_L', 'Liant_Total',
                     'Resistance', 'Diffusion_Cl', 'Carbonatation',
-                    'CO2_Total', 'CO2_Classe'  # ✅ NOUVEAU
+                    'CO2_Total', 'CO2_Classe'  
                 ]
                 
                 df_display = df_comparison[[col for col in display_cols if col in df_comparison.columns]]
@@ -285,26 +299,26 @@ if len(st.session_state['comparison_formulations']) >= 2:
                     'Carbonatation': 'Carbonatation (mm)',
                     'Ratio_E_L': 'Ratio E/L',
                     'Liant_Total': 'Liant (kg)',
-                    'CO2_Total': 'CO₂ (kg/m³)',  # ✅ NOUVEAU
-                    'CO2_Classe': 'Classe CO₂'    # ✅ NOUVEAU
+                    'CO2_Total': 'CO₂ (kg/m³)',  
+                    'CO2_Classe': 'Classe CO₂'    
                 }
                 
                 df_display = df_display.rename(columns=rename_map)
                 
-                # ✅ Highlight meilleurs + CO₂ min
+                # Highlight meilleurs + CO₂ min
                 st.dataframe(
                     df_display.style.highlight_max(
                         subset=['Résistance (MPa)'],
                         color='lightgreen'
                     ).highlight_min(
-                        subset=['Diffusion Cl⁻', 'Carbonatation (mm)', 'CO₂ (kg/m³)'],  # ✅ CO₂ min = bon
+                        subset=['Diffusion Cl⁻', 'Carbonatation (mm)', 'CO₂ (kg/m³)'],  
                         color='lightgreen'
                     ).format({
                         'Résistance (MPa)': '{:.2f}',
                         'Diffusion Cl⁻': '{:.2f}',
                         'Carbonatation (mm)': '{:.2f}',
                         'Ratio E/L': '{:.3f}',
-                        'CO₂ (kg/m³)': '{:.1f}'  # ✅ NOUVEAU
+                        'CO₂ (kg/m³)': '{:.1f}'  
                     }),
                     width='stretch',
                     height=400
@@ -318,12 +332,12 @@ if len(st.session_state['comparison_formulations']) >= 2:
                 
                 st.markdown("### 📈 Visualisations")
                 
-                # ✅ Nouveau tab CO₂
+                # Nouveau tab CO₂
                 tab_parallel, tab_bars, tab_radar, tab_co2 = st.tabs([
                     "Coordonnées Parallèles",
                     "Barres Comparatives",
                     "Radars",
-                    "🌍 Impact CO₂"  # ✅ NOUVEAU
+                    "🌍 Impact CO₂"  
                 ])
                 
                 with tab_parallel:
@@ -349,7 +363,7 @@ if len(st.session_state['comparison_formulations']) >= 2:
                         fig_c.update_layout(title="Carbonatation (mm)", height=300, showlegend=False)
                         st.plotly_chart(fig_c, width='stretch')
                     
-                    # ✅ Graphique CO₂
+                    # Graphique CO₂
                     with col_b4:
                         fig_co2_bar = go.Figure(data=[go.Bar(x=df_comparison['Nom'], y=df_comparison['CO2_Total'], marker_color='#2ecc71')])
                         fig_co2_bar.update_layout(title="CO₂ (kg/m³)", height=300, showlegend=False)
@@ -373,7 +387,7 @@ if len(st.session_state['comparison_formulations']) >= 2:
                             fig_radar = plot_performance_radar(predictions_radar, name=row['Nom'])
                             st.plotly_chart(fig_radar, width='stretch')
                 
-                # ✅ NOUVEAU TAB CO₂
+                # NOUVEAU TAB CO₂
                 with tab_co2:
                     st.markdown("#### Comparaison Empreinte Carbone")
                     
@@ -438,7 +452,7 @@ if len(st.session_state['comparison_formulations']) >= 2:
                 
                 st.markdown("### 🏆 Classements")
                 
-                # ✅ 4 classements (ajout CO₂)
+                # 4 classements (ajout CO₂)
                 col_rank1, col_rank2, col_rank3, col_rank4 = st.columns(4)
                 
                 with col_rank1:
@@ -462,7 +476,7 @@ if len(st.session_state['comparison_formulations']) >= 2:
                         emoji = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else ""))
                         st.markdown(f"{emoji} **{i}.** {row.Nom} - {row.Carbonatation:.1f} mm")
                 
-                # ✅ NOUVEAU : Classement CO₂
+                # NOUVEAU : Classement CO₂
                 with col_rank4:
                     st.markdown("#### 🌍 Impact CO₂")
                     df_co2_rank = df_comparison[['Nom', 'CO2_Total']].sort_values('CO2_Total', ascending=True)
@@ -506,7 +520,7 @@ if len(st.session_state['comparison_formulations']) >= 2:
             
             except Exception as e:
                 logger.error(f"Erreur comparaison: {e}", exc_info=True)
-                st.error(f"❌ Erreur : {e}")
+                st.error(f"Erreur : {e}")
 
 elif len(st.session_state['comparison_formulations']) == 1:
     st.info("ℹ️ Ajoutez au moins une autre formulation")
@@ -541,7 +555,9 @@ if st.session_state['comparison_formulations']:
         with col_form1:
             st.markdown(f"**{i+1}. {formulation['name']}**")
             comp = formulation['composition']
-            st.caption(f"Ciment: {comp.get('Ciment', 0):.0f} | Eau: {comp.get('Eau', 0):.0f} | Age: {comp.get('Age', 0):.0f}j")
+            mk = comp.get('Metakaolin', 0)
+            mk_display = f" | MK: {mk:.0f}" if mk > 0 else ""
+            st.caption(f"Ciment: {comp.get('Ciment', 0):.0f} | Eau: {comp.get('Eau', 0):.0f} | Age: {comp.get('Age', 0):.0f}j{mk_display}")
         
         with col_form2:
             if st.button("🗑️", key=f"remove_{i}"):

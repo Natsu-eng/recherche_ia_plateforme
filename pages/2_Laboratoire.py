@@ -43,6 +43,9 @@ st.set_page_config(
 apply_custom_theme(st.session_state.get('app_theme', 'Clair'))
 render_sidebar(db_manager=st.session_state.get('db_manager'))
 
+from app.components.navbar import render_navbar
+render_navbar(current_page="Laboratoire")
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # HEADER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -125,7 +128,7 @@ if mode == "🔍 Sensibilité Simple":
                         n_points=n_points
                     )
                     
-                    st.success("✅ Analyse terminée")
+                    st.success("Analyse terminée")
                     
                     # Élasticités
                     col_e1, col_e2, col_e3 = st.columns(3)
@@ -258,7 +261,7 @@ elif mode == "📊 Sensibilité Multi-Paramètres":
                         st.error(f"Erreur: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MODE 3: MONTE CARLO + CO₂ (✅ NOUVEAU MOTEUR)
+# MODE 3: MONTE CARLO + CO₂ (NOUVEAU MOTEUR)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 elif mode == "🎲 Monte Carlo + CO₂":
@@ -276,7 +279,7 @@ elif mode == "🎲 Monte Carlo + CO₂":
             show_presets=True
         )
         
-        # ✅ Type ciment
+        # Type ciment
         from config.co2_database import CEMENT_CO2_KG_PER_TONNE
         cement_types = list(CEMENT_CO2_KG_PER_TONNE.keys())
         
@@ -302,12 +305,12 @@ elif mode == "🎲 Monte Carlo + CO₂":
         st.markdown("#### Résultats + CO₂")
         
         if run_mc:
-            with st.spinner(f"🔄 Simulation {n_simulations} scénarios..."):
+            with st.spinner(f"Simulation {n_simulations} scénarios..."):
                 try:
                     model = st.session_state.get('model')
                     features = st.session_state.get('features')
                     
-                    # ✅ NOUVEAU MOTEUR
+                    # NOUVEAU MOTEUR
                     engine = MonteCarloEngine(seed=42)
                     
                     result = engine.run_simulation(
@@ -320,7 +323,7 @@ elif mode == "🎲 Monte Carlo + CO₂":
                         batch_size=100
                     )
                     
-                    st.success(f"✅ {result.n_valid}/{result.n_simulations} simulations valides")
+                    st.success(f"{result.n_valid}/{result.n_simulations} simulations valides")
                     
                     # ═══════════════════════════════════════════════════
                     # STATISTIQUES (4 CIBLES)
@@ -345,7 +348,7 @@ elif mode == "🎲 Monte Carlo + CO₂":
                                 delta=f"±{result.carbonatation_stats.std:.1f}")
                         st.caption(f"CV: {result.carbonatation_stats.cv_percent:.1f}%")
                     
-                    # ✅ CO₂
+                    # CO₂
                     with col_s4:
                         st.metric("🌍 CO₂", f"{result.co2_stats.mean:.1f} kg/m³",
                                 delta=f"±{result.co2_stats.std:.1f}")
@@ -375,7 +378,7 @@ elif mode == "🎲 Monte Carlo + CO₂":
                             st.markdown(f"IC: [{result.carbonatation_stats.ci_lower:.1f}, {result.carbonatation_stats.ci_upper:.1f}]")
                             st.markdown(f"VaR 95%: {result.carbonatation_stats.var_95:.1f}")
                         
-                        # ✅ CO₂
+                        # CO₂
                         with col_ic4:
                             st.markdown("**CO₂**")
                             st.markdown(f"IC: [{result.co2_stats.ci_lower:.1f}, {result.co2_stats.ci_upper:.1f}]")
@@ -408,7 +411,7 @@ elif mode == "🎲 Monte Carlo + CO₂":
                                                  opacity=0.7, nbinsx=30, showlegend=False), row=2, col=1)
                     fig_mc.add_vline(x=result.carbonatation_stats.mean, line_dash="dash", line_color="red", row=2, col=1)
                     
-                    # ✅ CO₂
+                    # CO₂
                     fig_mc.add_trace(go.Histogram(x=result.co2_samples, marker_color='#27ae60',
                                                  opacity=0.7, nbinsx=30, showlegend=False), row=2, col=2)
                     fig_mc.add_vline(x=result.co2_stats.mean, line_dash="dash", line_color="red", row=2, col=2)
@@ -429,7 +432,7 @@ elif mode == "🎲 Monte Carlo + CO₂":
                         ]
                         
                         for name, stats in tests_results:
-                            status = "✅ Normale" if stats.is_normal else "❌ Non-normale"
+                            status = "Normale" if stats.is_normal else "Non-normale"
                             st.markdown(f"**{name}** : {status} (p={stats.normality_pvalue:.4f})")
                 
                 except Exception as e:
@@ -452,7 +455,7 @@ elif mode == "📐 Surfaces 3D + CO₂":
         
         baseline_3d = render_formulation_input(key_suffix="surface_3d", layout="compact", show_presets=True)
         
-        # ✅ Type ciment
+        # Type ciment
         from config.co2_database import CEMENT_CO2_KG_PER_TONNE
         cement_types_3d = list(CEMENT_CO2_KG_PER_TONNE.keys())
         
@@ -473,12 +476,12 @@ elif mode == "📐 Surfaces 3D + CO₂":
         st.markdown("#### Visualisation 4 Cibles")
         
         if generate_3d:
-            with st.spinner(f"🔄 Calcul surfaces ({resolution}x{resolution})..."):
+            with st.spinner(f"Calcul surfaces ({resolution}x{resolution})..."):
                 try:
                     model = st.session_state.get('model')
                     features = st.session_state.get('features')
                     
-                    # ✅ NOUVEAU MOTEUR
+                    # NOUVEAU MOTEUR
                     engine = SurfaceEngine()
                     
                     multi_surf = engine.generate_all_surfaces(
@@ -491,7 +494,7 @@ elif mode == "📐 Surfaces 3D + CO₂":
                         resolution=resolution
                     )
                     
-                    st.success("✅ 4 surfaces générées")
+                    st.success("4 surfaces générées")
                     
                     # ═══════════════════════════════════════════════════
                     # GRAPHIQUE 4 SUBPLOTS
@@ -525,7 +528,7 @@ elif mode == "📐 Surfaces 3D + CO₂":
                             st.markdown(f"Valeur: {z_opt:.2f}")
                 
                 except Exception as e:
-                    st.error(f"❌ Erreur : {e}")
+                    st.error(f"Erreur : {e}")
                     import traceback
                     st.code(traceback.format_exc())
 
